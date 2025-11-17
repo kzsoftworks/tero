@@ -23,7 +23,6 @@ services:
     environment:
       DB_URL: "postgresql+psycopg://postgres:admin@postgres/tero"
       OPENID_URL: ""
-    env_file: .env
     command: ["poetry", "run", "alembic", "upgrade", "head"]
   keycloak:
     image: keycloak/keycloak:26.3
