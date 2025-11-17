@@ -47,7 +47,6 @@ services:
       FRONTEND_URL: "http://localhost:8000"
       BROWSER_TOOL_PLAYWRIGHT_MCP_URL: "http://playwright:8931/mcp"
       BROWSER_TOOL_PLAYWRIGHT_OUTPUT_DIR: /tmp/playwright-output
-    env_file: .env
     ports:
       - "8000:8000"
     depends_on:
