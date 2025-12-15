@@ -10,10 +10,10 @@ from sqlmodel.sql.expression import SelectOfScalar
 from ..core.env import env
 from ..core.repos import attr, scalar
 from ..files.domain import File
+from ..teams.domain import GLOBAL_TEAM_ID, TeamRoleStatus
 from ..threads.domain import Thread, ThreadMessage
 from ..usage.domain import Usage
 from ..users.domain import User
-from ..teams.domain import GLOBAL_TEAM_ID, TeamRoleStatus
 from .domain import AgentListItem, Agent, UserAgent, AgentToolConfig, AgentToolConfigFile
 
 

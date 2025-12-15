@@ -10,11 +10,11 @@ from testcontainers.core.wait_strategies import LogMessageWaitStrategy
 from .common import *
 
 from tero.agents.api import AGENT_TOOL_FILE_PATH
-from tero.tools.docs import DocsTool
-from tero.tools.mcp import McpTool
-from tero.tools.jira import JiraTool
-from tero.tools.web import WebTool, WEB_TOOL_ID
 from tero.tools.browser import BrowserTool, BROWSER_TOOL_ID
+from tero.tools.docs import DocsTool
+from tero.tools.jira import JiraTool
+from tero.tools.mcp import McpTool
+from tero.tools.web import WebTool, WEB_TOOL_ID
 from tero.usage.domain import Usage, UsageType
 
 

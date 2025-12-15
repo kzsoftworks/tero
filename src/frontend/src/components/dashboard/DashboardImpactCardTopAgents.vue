@@ -302,7 +302,8 @@ watch(() => props.teamId, async () => {
     <DashboardRegisterExternalAgentModal :show-modal="showRegisterExternalAgentModal" @update:show-modal="showRegisterExternalAgentModal = $event" @new-external-agent-entry="loadAgentsData" />
 </template>
 
-<i18n lang="json">{
+<i18n lang="json">
+{
     "en": {
         "agentsTitle": "Agents",
         "loadingMoreAgents": "Loading more agents...",
@@ -335,4 +336,5 @@ watch(() => props.teamId, async () => {
         "startChatButtonLabel": "Usar ahora",
         "viewDetailsTooltip": "Ver detalles"
     }
-}</i18n>
+}
+</i18n>

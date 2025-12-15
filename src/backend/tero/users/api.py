@@ -13,8 +13,6 @@ from .repos import UserRepository
 
 
 router = APIRouter()
-
-
 USERS_PATH = f"{BASE_PATH}/users"
 
 

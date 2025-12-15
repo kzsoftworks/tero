@@ -39,3 +39,14 @@ export const removeAllAgents = async (): Promise<void> => {
   await updateAgents([])
   await browser.storage.local.set({ prompts: [] })
 }
+
+export const findAgentsByHubUrl = async (hubUrl: string): Promise<Agent[]> => {
+  const agents = await findAllAgents()
+  return agents.filter(a => a.url === hubUrl)
+}
+
+export const removeAgentsByHubUrl = async (hubUrl: string): Promise<void> => {
+  const agents = await findAllAgents()
+  const filteredAgents = agents.filter(a => a.url !== hubUrl)
+  await updateAgents(filteredAgents)
+}

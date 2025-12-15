@@ -2,6 +2,7 @@ import auth from './auth'
 import moment from 'moment'
 import type { JSONSchema7 } from 'json-schema'
 import { UploadedFile, FileStatus, AgentPrompt } from '../../../common/src/utils/domain'
+import type { StatusUpdate } from '../../../common/src/components/chat/ChatMessage.vue'
 
 export class HttpError extends Error {
   public status: number
@@ -29,24 +30,21 @@ export class Manifest {
   id: string
   contactEmail: string
   auth: ManifestAuthConfig
+  disablePublishGlobal: boolean
 
-  constructor(id: string, contactEmail: string, auth: ManifestAuthConfig) {
+  constructor(id: string, contactEmail: string, auth: ManifestAuthConfig, disablePublishGlobal: boolean) {
     this.id = id
     this.contactEmail = contactEmail
     this.auth = auth
+    this.disablePublishGlobal = disablePublishGlobal
   }
 }
 
 export const GLOBAL_TEAM_ID = 1;
-
 export const MY_TEAM_ID = 0;
-
 export const PRIVATE_TEAM_ID = -1;
-
 export const PRIVATE_AGENT_ID = -1;
-
 const PRIVATE_AGENT_ICON_BASE64 = 'iVBORw0KGgoAAAANSUhEUgAAADAAAAAwCAYAAABXAvmHAAAAAXNSR0IArs4c6QAAA+NJREFUaEPtmU2IV2UUxn9PaRFoGBkVmKZ9GFFEpQRWRh+LkDYhCUVBklGR9iW5KVoMtXGIMfowWohQaKjUrlWEWS2KgsQ2ZaGDRSGlWBJl2uk+cAYGnZn/e+feYf4T/wPDfxbvfd/z3POec57zXDHFTVPcf3oAJjuCvQj8LyMQEacB04HTE+Bx4Likf9sG3OoViogzgDnAZcBiYAEQwLfAXuAbYFDSsbaAtAYgIs4F7gZWpPOzTnLyL+AL4G3gfUm/tQGiFQARcU51ZV4C7gFmA/8A+4Ef0slLgIvzWv0KbK/WPCfpcFMQbQHoB9YAZ6bTbwAfA4fSwfOApcBDwBXA38Crkp6ddAARcRuwrXLIV+h74DFg1/B7HhF+UU5qg9gIXFoB9hVaIemjJiAaRSCrzbvAcuBP4BFJW8ZyKCJWARsAJ/xbVZSeaFKdmgKYD+wArgO+Bm6XNHRtRsQREWcBnwHXAl868SX9ON4oNAWwBNgELPRblfR0iSMRMQA8lVfuYUk7S54baU1TAMuA17PCrJPkZO5oEeHkXZ+V6nFJH3R8aJQFPQC9CEDvCtXOn4hwx51XcRsn8TrgQnfW5Dkl+z2QnfvnTGYnsUmeO3Qtq53EEXF1VT0eBPxrEP4zoAPAL4WnXwBclJRi0M5XzXBPVc02S/JvsdUCEBFXVTV/K3B5dtLigwoWmmJ/V1HveyWZdhdZXQAmaOYzHlB2Z0etHfaTPHP03Mk9P/h/86hbiryHclUiIhYBHwIzgPeS9zSmw3Y06fg7wJ3AH8AdkkwzOlpxBCLC995d18+slWRW2ZpFhFnsyznBubRuLtl8PAC8b/EBJU5kFIZeUK39JwxARHg29iTmQX63pN/HAjMswpMPICJuqBL9+WSpdsilcb2kz0cD0TUAIsJJbrq8cpisciLn4GckuXmdYt0E4JpqsH+tqlg3pYxiZ90/PgVWS3L57WoAVyaAW4F96aknN5dgJ7+bVVcDsB7kgcUqxcz01LXdw06/JOtD3QsgS6L50V3Azdk3PC9vkWTOM6J1TQ4MeZcyo0Uul+ojko5OmTI6lqOTGYH7gTezNLrGDzTRc4YDSX3JKsWL2fgelWRu1NHqdGKraZ9Uytr5qeesBX7KAzseNMYCS/FzgT7gRuCgc0eSVb6OVgwgk9OK2pMp3rpEWsA1tW5i03K+MAiDeUWSo1FkdQF4dHyhGjzuA84uOqF8kbmSZcm+0br1SFvVApBRsIh7fQ42JmxtmKXFXcBXdb8b1AaQIPycxdmhT0hNQZgrHZPkrzm1bFwAap0wwYt7ACb4BXfcvheBjq9oghdM+Qj8B4wJmEDEKTttAAAAAElFTkSuQmCC';
-
 const PRIVATE_AGENT_ICON_BG = '1F1F1F';
 
 export enum LlmModelType {
@@ -88,6 +86,20 @@ export enum ReasoningEffort {
   LOW = 'LOW',
   MEDIUM = 'MEDIUM',
   HIGH = 'HIGH'
+}
+
+export class Evaluator {
+  modelId: string
+  temperature: LlmTemperature
+  reasoningEffort: ReasoningEffort
+  prompt: string
+
+  constructor(modelId: string, temperature: LlmTemperature, reasoningEffort: ReasoningEffort, prompt: string) {
+    this.modelId = modelId
+    this.temperature = temperature
+    this.reasoningEffort = reasoningEffort
+    this.prompt = prompt
+  }
 }
 
 export enum FileProcessor {
@@ -171,7 +183,8 @@ export class TeamRole {
 
 export enum Role {
   TEAM_OWNER = "owner",
-  TEAM_MEMBER = "member"
+  TEAM_MEMBER = "member",
+  TEAM_EDITOR = "editor"
 }
 
 export class Agent {
@@ -308,8 +321,9 @@ export class ThreadMessage {
   hasPositiveFeedback?: boolean
   files?: UploadedFile[]
   stopped?: boolean
+  statusUpdates: StatusUpdate[] = []
 
-  constructor(id: number, text: string, timestamp: Date, origin: ThreadMessageOrigin, children: ThreadMessage[], minutesSaved?: number, feedbackText?: string, hasPositiveFeedback?: boolean, stopped?: boolean) {
+  constructor(id: number, text: string, timestamp: Date, origin: ThreadMessageOrigin, children: ThreadMessage[], minutesSaved?: number, feedbackText?: string, hasPositiveFeedback?: boolean, stopped?: boolean, statusUpdates?: StatusUpdate[]) {
     this.id = id
     this.text = text
     this.timestamp = timestamp
@@ -319,6 +333,7 @@ export class ThreadMessage {
     this.feedbackText = feedbackText
     this.hasPositiveFeedback = hasPositiveFeedback
     this.stopped = stopped
+    this.statusUpdates = statusUpdates || []
   }
 }
 
@@ -455,8 +470,8 @@ export class NewUser {
   role: Role;
 
   constructor(username: string, role: Role) {
-      this.username = username;
-      this.role = role;
+    this.username = username;
+    this.role = role;
   }
 }
 
@@ -559,13 +574,17 @@ export class TestCaseResult {
   testSuiteRunId?: number
   executedAt: Date
   status: TestCaseResultStatus
+  testCaseName: string
+  evaluatorAnalysis?: string
 
-  constructor(testCaseId: number, executedAt: Date, status: TestCaseResultStatus, id?: number, testSuiteRunId?: number) {
+  constructor(testCaseId: number, executedAt: Date, status: TestCaseResultStatus, testCaseName: string, id?: number, testSuiteRunId?: number, evaluatorAnalysis?: string) {
     this.testCaseId = testCaseId
     this.executedAt = executedAt
     this.status = status
+    this.testCaseName = testCaseName
     this.testSuiteRunId = testSuiteRunId
     this.id = id
+    this.evaluatorAnalysis = evaluatorAnalysis
   }
 }
 
@@ -579,7 +598,6 @@ export enum TestCaseResultStatus {
 }
 
 export type TestSuiteExecutionStreamEvent =
-  | { type: 'suite.start'; data: { suiteRunId: number } }
   | { type: 'suite.test.start'; data: { testCaseId: number; resultId: number } }
   | { type: 'suite.test.metadata'; data: { testCaseId: number; resultId: number } }
   | { type: 'suite.test.phase'; data: { phase: string; status?: string; evaluation?: any } }
@@ -589,7 +607,7 @@ export type TestSuiteExecutionStreamEvent =
   | { type: 'suite.test.agentMessage.complete'; data: { id: number; text: string } }
   | { type: 'suite.test.executionStatus'; data: any }
   | { type: 'suite.test.error'; data: { message: string } }
-  | { type: 'suite.test.complete'; data: { testCaseId: number; resultId: number; status: string } }
+  | { type: 'suite.test.complete'; data: { testCaseId: number; resultId: number; status: string; evaluation?: any } }
   | { type: 'suite.complete'; data: { suiteRunId: number; status: string; totalTests: number; passed: number; failed: number; errors: number; skipped: number } }
   | { type: 'suite.error'; data: {} }
 
@@ -779,7 +797,7 @@ export class ApiService {
     return await this.fetchJson(`/agents/${agentId}/tools/${toolId}/files`)
   }
 
-  async findAgentDocToolFile(agentId: number, toolId: string, fileId: number): Promise<DocToolFile> {
+  async findAgentToolFile(agentId: number, toolId: string, fileId: number): Promise<DocToolFile> {
     return await this.fetchJson(`/agents/${agentId}/tools/${toolId}/files/${fileId}`)
   }
 
@@ -810,6 +828,14 @@ export class ApiService {
 
   async deleteAgentToolFile(agentId: number, toolId: string, fileId: number) {
     await this.delete(`/agents/${agentId}/tools/${toolId}/files/${fileId}`)
+  }
+
+  async findAgentEvaluator(agentId: number): Promise<Evaluator> {
+    return await this.fetchJson(`/agents/${agentId}/evaluator`)
+  }
+
+  async saveAgentEvaluator(agentId: number, evaluator: Evaluator): Promise<Evaluator> {
+    return await this.put(`/agents/${agentId}/evaluator`, evaluator)
   }
 
   async findAgentPrompts(agentId: number): Promise<AgentPrompt[]> {
@@ -844,12 +870,24 @@ export class ApiService {
     return await this.put(`/agents/${agentId}/tests/${testCaseId}`, { name })
   }
 
+  async cloneTestCase(agentId: number, testCaseId: number): Promise<TestCase> {
+    return await this.post(`/agents/${agentId}/tests/${testCaseId}/clone`)
+  }
+
   async deleteTestCase(agentId: number, testCaseId: number) {
     await this.delete(`/agents/${agentId}/tests/${testCaseId}`)
   }
 
   async findTestCaseMessages(agentId: number, testCaseId: number): Promise<ThreadMessage[]> {
     return await this.fetchJson(`/agents/${agentId}/tests/${testCaseId}/messages`)
+  }
+
+  async findTestCaseEvaluator(agentId: number, testCaseId: number): Promise<Evaluator> {
+    return await this.fetchJson(`/agents/${agentId}/tests/${testCaseId}/evaluator`)
+  }
+
+  async saveTestCaseEvaluator(agentId: number, testCaseId: number, config: Evaluator): Promise<Evaluator> {
+    return await this.put(`/agents/${agentId}/tests/${testCaseId}/evaluator`, config)
   }
 
   async addTestCaseMessage(agentId: number, testCaseId: number, message: TestCaseNewThreadMessage): Promise<ThreadMessage> {
@@ -860,10 +898,15 @@ export class ApiService {
     return await this.fetchJson(`/agents/${agentId}/tests/${testCaseId}/messages/${messageId}`, 'PUT', message)
   }
 
-  async *runTestSuiteStream(agentId: number, testCaseIds?: number[]): AsyncIterable<TestSuiteExecutionStreamEvent> {
-    const url = `/agents/${agentId}/tests/runs`;
+  async runTestSuite(agentId: number, testCaseIds?: number[]): Promise<TestSuiteRun> {
     const requestBody = testCaseIds ? { test_case_ids: testCaseIds } : {};
-    const resp = await this.fetch(url, 'POST', requestBody);
+    const suiteRun = await this.fetchJson(`/agents/${agentId}/tests/runs`, 'POST', requestBody);
+    return this.parseTestSuiteRunDates(suiteRun);
+  }
+
+  async *streamTestSuiteUpdates(agentId: number, suiteRunId: number): AsyncIterable<TestSuiteExecutionStreamEvent> {
+    const url = `/agents/${agentId}/tests/runs/${suiteRunId}/stream`;
+    const resp = await this.fetch(url, 'GET');
 
     const contentType = resp.headers.get('content-type')
     if (contentType?.startsWith('text/event-stream')) {
@@ -874,22 +917,30 @@ export class ApiService {
     }
   }
 
+  async stopTestSuiteRun(agentId: number, suiteRunId: number): Promise<void> {
+    await this.post(`/agents/${agentId}/tests/runs/${suiteRunId}/stop`)
+  }
+
   async findTestSuiteRuns(agentId: number, limit: number = 20, offset: number = 0): Promise<TestSuiteRun[]> {
     const searchParams = new URLSearchParams({ limit: limit.toString(), offset: offset.toString() });
     const suiteRuns = await this.fetchJson(`/agents/${agentId}/tests/runs?${searchParams.toString()}`)
-    return suiteRuns.map((suiteRun: any) => this.parseTestSuiteRunDates(suiteRun))
+    return suiteRuns.map((suiteRun: TestSuiteRun) => this.parseTestSuiteRunDates(suiteRun))
   }
 
-  private parseTestSuiteRunDates(suiteRun: any): TestSuiteRun {
+  private parseTestSuiteRunDates(suiteRun: TestSuiteRun): TestSuiteRun {
     return {
       ...suiteRun,
-      executedAt: new Date(suiteRun.executedAt),
-      completedAt: suiteRun.completedAt ? new Date(suiteRun.completedAt) : undefined
+      executedAt: moment.utc(suiteRun.executedAt).toDate(),
+      completedAt: suiteRun.completedAt ? moment.utc(suiteRun.completedAt).toDate() : undefined
     }
   }
 
   async findTestSuiteRunResults(agentId: number, suiteRunId: number): Promise<TestCaseResult[]> {
     return await this.fetchJson(`/agents/${agentId}/tests/runs/${suiteRunId}/results`)
+  }
+
+  async deleteTestSuiteRun(agentId: number, suiteRunId: number): Promise<void> {
+    await this.delete(`/agents/${agentId}/tests/runs/${suiteRunId}`)
   }
 
   async findTestSuiteRunResultMessages(agentId: number, suiteRunId: number, resultId: number): Promise<ThreadMessage[]> {
@@ -937,12 +988,12 @@ export class ApiService {
   }
 
   async getImpactSummary(fromDate: Date, toDate: Date, teamId: number): Promise<ImpactSummary> {
-    const params = this.cleanSearchParams({from_date: fromDate, to_date: toDate, team_id: teamId})
+    const params = this.cleanSearchParams({ from_date: fromDate, to_date: toDate, team_id: teamId })
     return await this.fetchJson(`/impact/summary?${params}`)
   }
 
   async getImpactTopAgents(privateAgentsName: string, fromDate: Date, toDate: Date, teamId: number, search?: string, limit?: number, offset?: number, userId?: number): Promise<AgentImpactItem[]> {
-    const params = this.cleanSearchParams({from_date: fromDate, to_date: toDate, team_id: teamId, search: search, limit: limit, offset: offset, user_id: userId})
+    const params = this.cleanSearchParams({ from_date: fromDate, to_date: toDate, team_id: teamId, search: search, limit: limit, offset: offset, user_id: userId })
     const agents = await this.fetchJson(`/impact/agents?${params}`)
 
     return agents.map((agent: AgentImpactItem) => {
@@ -960,17 +1011,17 @@ export class ApiService {
   }
 
   async getImpactTopUsers(fromDate: Date, toDate: Date, teamId: number, search?: string, limit?: number, offset?: number, agentId?: number, isExternalAgent?: boolean): Promise<UserImpactItem[]> {
-    const params = this.cleanSearchParams({from_date: fromDate, to_date: toDate, team_id: teamId, search: search, limit: limit, offset: offset, agent_id: agentId, is_external_agent: isExternalAgent})
+    const params = this.cleanSearchParams({ from_date: fromDate, to_date: toDate, team_id: teamId, search: search, limit: limit, offset: offset, agent_id: agentId, is_external_agent: isExternalAgent })
     return await this.fetchJson(`/impact/users?${params}`)
   }
 
   async getUsageSummary(fromDate: Date, toDate: Date, teamId: number): Promise<UsageSummary> {
-    const params = this.cleanSearchParams({from_date: fromDate, to_date: toDate, team_id: teamId})
+    const params = this.cleanSearchParams({ from_date: fromDate, to_date: toDate, team_id: teamId })
     return await this.fetchJson(`/usage/summary?${params}`)
   }
 
   async getUsageTopAgents(privateAgentsName: string, fromDate: Date, toDate: Date, teamId: number, search?: string, limit?: number, offset?: number, userId?: number): Promise<AgentUsageItem[]> {
-    const params = this.cleanSearchParams({from_date: fromDate, to_date: toDate, team_id: teamId, search: search, limit: limit, offset: offset, user_id: userId})
+    const params = this.cleanSearchParams({ from_date: fromDate, to_date: toDate, team_id: teamId, search: search, limit: limit, offset: offset, user_id: userId })
     const agents = await this.fetchJson(`/usage/agents?${params}`)
 
     return agents.map((agent: AgentUsageItem) => {
@@ -988,7 +1039,7 @@ export class ApiService {
   }
 
   async getUsageTopUsers(fromDate: Date, toDate: Date, teamId: number, search?: string, limit?: number, offset?: number, agentId?: number): Promise<UserUsageItem[]> {
-    const params = this.cleanSearchParams({from_date: fromDate, to_date: toDate, team_id: teamId, search: search, limit: limit, offset: offset, agent_id: agentId})
+    const params = this.cleanSearchParams({ from_date: fromDate, to_date: toDate, team_id: teamId, search: search, limit: limit, offset: offset, agent_id: agentId })
     return await this.fetchJson(`/usage/users?${params}`)
   }
 
@@ -1062,7 +1113,7 @@ export class ApiService {
     }
   }
 
-  private async *fetchSSEStream<T=any>(resp: Response, url: string): AsyncIterable<SSEPayload<T>> {
+  private async *fetchSSEStream<T = any>(resp: Response, url: string): AsyncIterable<SSEPayload<T>> {
     const reader = resp.body!.getReader()
     let done = false
 
@@ -1095,8 +1146,12 @@ export class ApiService {
     return data.transcription
   }
 
-  async toolAuth(toolId: string, code: string, state: string): Promise<void> {
-    await this.post(`/tools/${toolId}/oauth-callback`, { code, state })
+  async completeToolAuth(toolId: string, state: string, code: string): Promise<void> {
+    await this.put(`/tools/${toolId}/oauth/${state}`, { code })
+  }
+
+  async deleteToolAuth(toolId: string, state: string): Promise<void> {
+    await this.delete(`/tools/${toolId}/oauth/${state}`)
   }
 
   async findBudgetUsage(): Promise<BudgetUsage> {
@@ -1166,7 +1221,7 @@ export class ApiService {
   }
 }
 
-export class ThreadMessagePart{
+export class ThreadMessagePart {
   userMessage?: { id: number, files: UploadedFile[] }
   answerText?: string
   metadata?: {

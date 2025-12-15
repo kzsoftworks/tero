@@ -13,7 +13,6 @@ from ..users.domain import User
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
 EXTERNAL_AGENTS_PATH = f"{BASE_PATH}/external-agents"
 
 

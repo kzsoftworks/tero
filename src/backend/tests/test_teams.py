@@ -2,11 +2,12 @@ from typing import Callable
 
 from .common import *
 
+from tero.agents.api import AGENTS_PATH
 from tero.teams.api import TEAM_USER_PATH, TEAM_USERS_PATH, TEAMS_PATH, TEAM_PATH
 from tero.teams.domain import TeamCreate, TeamRoleStatus, TeamUpdate, TeamUser
 from tero.users.api import CURRENT_USER_PATH, CURRENT_USER_TEAM_PATH
 from tero.users.domain import UserProfile, PublicTeamRole
-from tero.agents.api import AGENTS_PATH
+
 
 async def test_get_users_from_team(client: AsyncClient):
     users = await _get_team_users(client, 2)

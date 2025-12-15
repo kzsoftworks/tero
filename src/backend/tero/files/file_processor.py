@@ -16,6 +16,7 @@ from ..files.pdf_processor import process_pdf_basic, process_pdf_enhanced
 
 logger = logging.getLogger(__name__)
 
+
 def get_encoding(content_type: Optional[str]) -> str:
     charset_param = '; charset='
     encoding = content_type.split(charset_param, 1)[1] if content_type and charset_param in content_type else 'utf-8'
@@ -38,7 +39,17 @@ class PlainTextFileProcessor(BaseFileProcessor):
     
     def extract_text(self, file: File, file_quota: FileQuota) -> str:
         encoding = get_encoding(file.content_type)
-        return file.content.decode(encoding)
+        try:
+            return file.content.decode(encoding)
+        except (UnicodeDecodeError, LookupError):
+            logger.warning(f"Failed to decode {file.name} with {encoding}. Trying fallback encodings.", exc_info=True)
+            for fallback_encoding in [ e for e in ['utf-8', 'latin-1', 'cp1252'] if e != encoding]:
+                try:
+                    return file.content.decode(fallback_encoding)
+                except (UnicodeDecodeError, LookupError):
+                    continue
+            logger.warning(f"All encodings failed for {file.name}, using {encoding} with error replacement")
+            return file.content.decode(encoding, errors='replace')
 
 class Sheet(ABC):
     

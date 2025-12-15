@@ -1,6 +1,4 @@
-import io
 from typing import Optional
-
 
 import boto3
 from langchain_aws import ChatBedrockConverse

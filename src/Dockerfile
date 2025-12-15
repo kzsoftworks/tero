@@ -29,8 +29,8 @@ RUN poetry config installer.max-workers 10
 
 WORKDIR /usr/src/app
 ENV PYTHONPATH=/usr/src/app
-COPY docker/wait-for-it.sh wait-for-it.sh
 
+COPY docker/wait-for-it.sh wait-for-it.sh
 COPY backend/pyproject.toml backend/poetry.lock ./
 
 RUN poetry install --no-root

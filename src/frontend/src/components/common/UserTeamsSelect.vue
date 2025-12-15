@@ -8,6 +8,7 @@ const props = defineProps<{
     modelValue: number | null;
     defaultTeams: Team[];
     defaultSelectedTeam: number | null;
+    disabled?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -47,5 +48,5 @@ defineExpose({
 </script>
 
 <template>
-    <Select v-model="model" :options="options" option-label="name" option-value="id" />
+    <Select v-model="model" :options="options" option-label="name" option-value="id" :disabled="props.disabled" :class="{ '!bg-pale !cursor-not-allowed !opacity-60': props.disabled }" />
 </template>

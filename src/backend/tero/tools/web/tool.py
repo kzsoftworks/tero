@@ -14,7 +14,6 @@ from langchain_tavily import TavilyExtract, TavilySearch
 from pydantic import BaseModel, Field
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from ...agents.domain import Agent
 from ...core.env import env
 from ...usage.domain import ToolUsage, UsageType
 from ..core import AgentTool, AgentToolConfig, AgentToolMetadata, load_schema, StatusUpdateCallbackHandler
@@ -29,8 +28,10 @@ class WebSearchToolArgs(BaseModel):
     query: str = Field(description="The query to search for")
     tool_call_id: Annotated[str, InjectedToolCallId]
 
+
 def parse_result_search(result: str) -> List[str]:
     return [f"{e.get('url')}: {e.get('content')[0:200]}" for e in ast.literal_eval(result).get("results")]
+
 
 class WebSearchLangchainTool(BaseTool):
     name: str = "web_search"
@@ -89,12 +90,15 @@ class WebSearchLangchainTool(BaseTool):
             response_metadata=AgentToolMetadata(tool_usage=tool_usage).model_dump()
         )
 
+
 class WebExtractToolArgs(BaseModel):
     urls: List[str] = Field(description="The URLs to extract text from")
     tool_call_id: Annotated[str, InjectedToolCallId]
 
+
 def parse_result_extract(result: Any) -> List[str]:
     return [f"{e.get('url')}: {e.get('raw_content', e.get('error'))[:200]}" for e in result] if isinstance(result, list) else result
+
 
 class WebExtractLangchainTool(BaseTool):
     name: str = "web_extract"
@@ -159,12 +163,11 @@ class WebExtractLangchainTool(BaseTool):
             response_metadata=AgentToolMetadata(tool_usage=tool_usage).model_dump()
         )
 
+
 class WebTool(AgentTool):
     id: str = WEB_TOOL_ID
     name: str = "Web Tools"
-    description: str = (
-        "Provides web search and web extraction capabilities."
-    )
+    description: str = "Provides web search and web extraction capabilities."
     config_schema: dict = load_schema(__file__)
 
     async def _setup_tool(self, prev_config: Optional[AgentToolConfig]) -> Optional[dict]:

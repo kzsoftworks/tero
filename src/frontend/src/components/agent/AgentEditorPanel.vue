@@ -2,46 +2,38 @@
 import { onMounted, ref, computed, watch } from 'vue'
 import { useRoute, onBeforeRouteUpdate, useRouter } from 'vue-router'
 import { useI18n } from 'vue-i18n'
-import { Agent, ApiService, LlmModel, LlmTemperature, ReasoningEffort, LlmModelType, AgentToolConfig, AutomaticAgentField, Team, TestCase, TestCaseResult, TestCaseResultStatus, TestSuiteRun, TestSuiteRunStatus, LlmModelVendor } from '@/services/api'
-import { IconPlayerPlay, IconPencil, IconTrash, IconDownload, IconUpload } from '@tabler/icons-vue'
-import TestCaseStatus from './TestCaseStatus.vue'
-import { AnimationEffect } from '../../../../common/src/utils/animations'
+import { Agent, ApiService, LlmModel, AgentToolConfig, AutomaticAgentField, Team, TestCase, TestSuiteRun, GLOBAL_TEAM_ID, Role, TeamRoleStatus, findManifest } from '@/services/api'
+import { IconPlayerPlay, IconPencil, IconDownload, IconUpload, IconListDetails } from '@tabler/icons-vue'
 import { useErrorHandler } from '@/composables/useErrorHandler'
 import { useAgentStore } from '@/composables/useAgentStore'
 import { useAgentPromptStore } from '@/composables/useAgentPromptStore'
+import { useTestCaseStore } from '@/composables/useTestCaseStore'
 import { loadUserProfile } from '@/composables/useUserProfile'
 import { AgentPrompt, UploadedFile } from '../../../../common/src/utils/domain'
-import moment from 'moment'
-import openAiIcon from '@/assets/images/open-ai.svg'
-import googleIcon from '@/assets/images/gemini.svg'
-import anthropicIcon from '@/assets/images/anthropic.svg'
-
+import { AgentTestcaseChatUiMessage } from './AgentTestcaseChatMessage.vue'
 
 const props = defineProps<{
   selectedThreadId: number
-  selectedTestCaseId?: number
   loadingTests?: boolean
   editingTestcase?: boolean
-  runningTests?: boolean
   testCases?: TestCase[]
-  testCaseResults?: TestCaseResult[]
-  testSuiteRun?: TestSuiteRun
+  isComparingResultWithTestSpec?: boolean
+  testSpecMessages?: AgentTestcaseChatUiMessage[]
 }>()
 
 const emit = defineEmits<{
-  (e: 'selectTestCase', testCaseId: number | undefined): void
   (e: 'showTestCaseEditor', show: boolean): void
   (e: 'editingTestcase', editing: boolean): void
-  (e: 'deleteTestCase', testCaseThreadId: number): void
   (e: 'runTests'): void
   (e: 'runSingleTest', testCaseId: number): void
-  (e: 'newTestCase', testCase: TestCase): void
   (e: 'importAgent' ): void
+  (e: 'selectExecution', execution: TestSuiteRun): void
 }>()
 
 const { t } = useI18n()
 const { handleError } = useErrorHandler()
 const { setCurrentAgent } = useAgentStore()
+const { testCasesStore } = useTestCaseStore()
 
 const api = new ApiService()
 const route = useRoute()
@@ -54,16 +46,6 @@ const backendAgent = ref<Agent>()
 const isSaving = ref(false)
 const models = ref<LlmModel[]>([])
 const toolConfigs = ref<AgentToolConfig[]>([])
-const temperatures = [
-  { name: t('preciseTemperature'), value: LlmTemperature.PRECISE },
-  { name: t('neutralTemperature'), value: LlmTemperature.NEUTRAL },
-  { name: t('creativeTemperature'), value: LlmTemperature.CREATIVE }
-]
-const reasoningEfforts = [
-  { name: t('lowEffort'), value: ReasoningEffort.LOW },
-  { name: t('mediumEffort'), value: ReasoningEffort.MEDIUM },
-  { name: t('highEffort'), value: ReasoningEffort.HIGH }
-]
 const isGenerating = ref({
   name: false,
   description: false,
@@ -78,13 +60,11 @@ const publishPrompts = ref(false)
 const privatePromptsCount = computed(() => agentsPromptStore.prompts.filter(p => !p.shared).length)
 const isLoading = ref(true)
 const teams = ref<Team[]>([])
-const defaultTeams = ref<Team[]>([new Team(0, t('private')), new Team(1, t('global'))])
+const defaultTeams = ref<Team[]>([new Team(0, t('private'))])
 const selectedTeam = ref<number | null>(null)
 const activeTab = ref<string>('0')
-const activeTestCaseMenuId = ref<number | null>(null)
-const deletingTestCaseId = ref<number | null>(null)
-const renamingTestCaseId = ref<number | null>(null)
 const showImportAgent = ref(false)
+const showPastExecutions = ref(false)
 
 const loadAgentData = async (agentIdStr: string) => {
   const agentId = parseInt(agentIdStr)
@@ -104,10 +84,6 @@ const loadAgentData = async (agentIdStr: string) => {
   }
 }
 
-const findSelectedModel = (): LlmModel | undefined => {
-  return models.value.find((m) => m.id === agent.value?.modelId)
-}
-
 const loadPromptStarters = async (agentId: number) => {
   await loadAgentPrompts(agentId)
   starters.value = agentsPromptStore.prompts.filter(p => p.starter) || []
@@ -116,8 +92,15 @@ const loadPromptStarters = async (agentId: number) => {
 onMounted(async () => {
   try {
     models.value = await api.findModels()
+    const manifest = await findManifest()
     const user = await loadUserProfile()
+
+    if (!manifest.disablePublishGlobal || user!.teams.some(t => t.role === Role.TEAM_OWNER && t.id === GLOBAL_TEAM_ID && t.status === TeamRoleStatus.ACCEPTED)) {
+      defaultTeams.value.push(new Team(GLOBAL_TEAM_ID, t('global')))
+    }
+
     teams.value = [...defaultTeams.value, ...user!.teams.filter(t => !defaultTeams.value.some(dt => dt.id === t.id))];
+
     if (route.params.agentId) {
       await loadAgentData(route.params.agentId as string)
     }
@@ -270,75 +253,20 @@ const onUpdateToolConfigs = async () => {
   toolConfigs.value = await api.findAgentToolConfigs(agent.value!.id)
 }
 
-const selectTestCase = (testCaseId: number) => {
-  emit('selectTestCase', testCaseId)
-}
-
-const onEditTests = () => {
-  if (!props.testCases?.length && props.editingTestcase) {
-    return
+const onTestCaseDeleted = () => {
+  if (testCasesStore.testCases.length === 0 && !props.editingTestcase) {
+    emit('editingTestcase', true)
   }
-  emit('editingTestcase', !props.editingTestcase)
-}
-
-const toggleTestCaseMenu = (testCaseId: number) => {
-  activeTestCaseMenuId.value = activeTestCaseMenuId.value === testCaseId ? null : testCaseId
-}
-
-const closeTestCaseMenu = () => {
-  activeTestCaseMenuId.value = null
-}
-
-const onDeleteTestCase = (testCase: TestCase) => {
-  deletingTestCaseId.value = testCase.thread.id
-  closeTestCaseMenu()
-}
-
-const onConfirmDeleteTestCase = async () => {
-  try {
-    await api.deleteTestCase(agent.value!.id, deletingTestCaseId.value!)
-
-    emit('deleteTestCase', deletingTestCaseId.value!)
-    deletingTestCaseId.value = null
-  } catch (error) {
-    handleError(error)
-  }
-}
-
-const onRenameTestCase = (testCase: TestCase) => {
-  renamingTestCaseId.value = testCase.thread.id
-  closeTestCaseMenu()
-}
-
-const onSaveTestCaseName = async (newName: string) => {
-  try {
-    const testCase = props.testCases?.find(tc => tc.thread.id === renamingTestCaseId.value)
-    const updatedTestCase = await api.updateTestCase(agent.value!.id, renamingTestCaseId.value!, newName)
-    testCase!.thread.name = updatedTestCase.thread.name
-    renamingTestCaseId.value = null
-  } catch (error) {
-    handleError(error)
-  }
-}
-
-const onCancelRenameTestCase = () => {
-  renamingTestCaseId.value = null
-}
-
-const onCancelDeleteTestCase = () => {
-  deletingTestCaseId.value = null
-}
-
-const findTestCaseResult = (testCaseId: number) => {
-  return props.testCaseResults?.find((result) => result.testCaseId === testCaseId)
 }
 
 watch(activeTab, (newVal) => {
   emit('showTestCaseEditor', newVal === '1')
+  emit('editingTestcase', newVal === '1')
 })
 
-const modelType = computed(() => findSelectedModel()?.modelType)
 const isSelectedPublicTeam = computed(() => selectedTeam.value != null && selectedTeam.value > 0)
+
+const hasPublishableTeams = computed(() => teams.value.some(t => t.id > 0))
 
 const shareDialogTranslationKey = computed(() => {
   if (invalidAttrs.value) {
@@ -359,19 +287,6 @@ const shareDialogTranslationParams = computed(() => ({
   invalidAttrs: invalidAttrs.value,
   team: findTeam(selectedTeam.value!)?.name
 }))
-
-const onNewTestCase = async () => {
-  try {
-    const testCase = await api.addTestCase(agent.value!.id)
-    emit('newTestCase', testCase)
-  } catch (e) {
-    handleError(e)
-  }
-}
-
-const countResultWithStatus = (status: TestCaseResultStatus) => {
-  return props.testCaseResults?.filter((result) => result.status === status).length || 0
-}
 
 const exportAgent = async () => {
   try {
@@ -398,38 +313,21 @@ const onImportAgent = async (file: UploadedFile) => {
   }
 }
 
-// Flattens grouped models: showVendor is true only for the first model of each vendor to render logos once per group.
-const flatOptions = computed(() => {
-  const models = groupedModelsByVendor();
-  return models.flatMap((vendorModels) => vendorModels.map((m, i) => ({ ...m, vendor: m.modelVendor, showVendor: i === 0 })));
-});
-
-const groupedModelsByVendor = () => {
-  const map = new Map<LlmModelVendor, LlmModel[]>();
-
-  for (const model of models.value) {
-    if (!map.has(model.modelVendor)) {
-      map.set(model.modelVendor, []);
-    }
-    map.get(model.modelVendor)!.push(model);
-  }
-
-  return Array.from(map.values());
+const onSelectExecution = (execution: TestSuiteRun) => {
+  emit('selectExecution', execution)
+  showPastExecutions.value = false
 }
-
-const vendorLogos: Record<LlmModelVendor, string | undefined> = {
-  [LlmModelVendor.OPENAI]: openAiIcon,
-  [LlmModelVendor.GOOGLE]: googleIcon,
-  [LlmModelVendor.ANTHROPIC]: anthropicIcon
-}
-
 </script>
 
 <template>
   <Tabs v-model:value="activeTab" class="h-full flex flex-col">
     <FlexCard header-height="auto" header-class="!py-0" class="flex flex-col h-full">
       <template #header>
-        <div class="flex flex-row justify-between items-center">
+        <div v-if="isComparingResultWithTestSpec && testSpecMessages" class="flex flex-row gap-2 items-center min-h-[73px]">
+          <IconListDetails />
+          {{ t('testSpec') }}
+        </div>
+        <div v-else class="flex flex-row justify-between items-center">
           <div class="flex flex-row items-center gap-3 mt-1">
             <SimpleButton @click="onClose">
               <IconArrowLeft />
@@ -469,7 +367,17 @@ const vendorLogos: Record<LlmModelVendor, string | undefined> = {
               }]"/>
         </div>
       </template>
-      <TabPanels class="flex-1 !p-0.5 overflow-hidden">
+      <div v-if="isComparingResultWithTestSpec && testSpecMessages" class="flex-1 overflow-y-auto p-4">
+        <div v-if="testSpecMessages.length > 0" class="flex flex-col gap-2">
+          <div v-for="message in testSpecMessages" :key="message.uuid">
+            <AgentTestcaseChatMessage :message="message"
+              :actions-enabled="false"
+              :is-selected="false"
+              :selectable="false" />
+          </div>
+        </div>
+      </div>
+      <TabPanels v-else class="flex-1 !p-0.5 overflow-hidden">
         <TabPanel value="0" class="h-full overflow-y-auto">
           <AgentEditorPanelSkeleton v-if="isLoading" />
           <div class="flex flex-col gap-3 px-4 py-2 mb-4" v-if="agent && !isLoading">
@@ -480,7 +388,7 @@ const vendorLogos: Record<LlmModelVendor, string | undefined> = {
               <div class="form-field !flex-row gap-3 items-center">
                 <label for="visibility">{{ t('visibilityLabel') }}</label>
                 <UserTeamsSelect id="visibility" v-model="selectedTeam" :default-teams="defaultTeams" :default-selected-team="selectedTeam"
-                  @change="onChangeTeam" />
+                  @change="onChangeTeam" :disabled="!hasPublishableTeams" />
               </div>
             </div>
             <div class="form-field relative">
@@ -495,50 +403,13 @@ const vendorLogos: Record<LlmModelVendor, string | undefined> = {
                 :required="isSelectedPublicTeam" @blur="updateAgent" :placeholder="t('descriptionPlaceholder')"
                 @end-icon-click="generateDescription" end-icon="IconWand" :loading="isGenerating.description" />
             </div>
-            <div class="flex flex-row gap-3" id="agent-model-container">
-              <div class="form-field w-full">
-                <label for="model">{{ t('modelLabel') }}</label>
-                <Select
-                  id="model"
-                  v-model="agent.modelId"
-                  option-label="name"
-                  option-value="id"
-                  class="w-full"
-                  appendTo="#agent-model-container"
-                  overlay-class="left-8! mt-[-20px]! w-[calc(100%-64px)]! p-2! pr-0! h-full! max-h-[45%]!"
-                  :options="flatOptions"
-                  @change="updateAgent"
-                >
-                  <template #option="slotProps">
-                    <div class="flex items-stretch gap-3 w-full">
-                      <div class="w-32 flex items-center self-stretch">
-                        <img v-if="slotProps.option.showVendor && slotProps.option.vendor && vendorLogos[slotProps.option.vendor as LlmModelVendor]"
-                          :src="vendorLogos[slotProps.option.vendor as LlmModelVendor]"
-                          :alt="slotProps.option.vendor"
-                           />
-                      </div>
-                      <div :class="['flex-1 flex flex-col gap-1 hover:bg-pale rounded-md p-3', slotProps.selected ? 'selected-option' : '']">
-                        <div class="font-medium">{{ slotProps.option.name }}</div>
-                        <div class="text-sm font-normal break-words whitespace-normal">{{ slotProps.option.description }}</div>
-                      </div>
-                    </div>
-                  </template>
-                  <template #dropdownicon>
-                    <IconCaretRightFilled />
-                  </template>
-                </Select>
-              </div>
-              <div class="form-field" v-if="modelType === LlmModelType.CHAT">
-                <label for="temperature">{{ t('temperatureLabel') }}</label>
-                <SelectButton id="temperature" v-model="agent.temperature" :options="temperatures" option-label="name"
-                  option-value="value" :allow-empty="false" @change="updateAgent" />
-              </div>
-              <div class="form-field" v-if="modelType === LlmModelType.REASONING">
-                <label for="reasoningEffort">{{ t('reasoningEffortLabel') }}</label>
-                <SelectButton id="reasoningEffort" v-model="agent.reasoningEffort" :options="reasoningEfforts"
-                  option-label="name" option-value="value" :allow-empty="false" @change="updateAgent" />
-              </div>
-            </div>
+            <AgentModelSelect
+              v-model:model-id="agent.modelId"
+              :models="models"
+              v-model:temperature="agent.temperature"
+              v-model:reasoning-effort="agent.reasoningEffort"
+              @change="updateAgent"
+            />
             <div class="form-field relative">
               <label for="systemPrompt">{{ t('systemPromptLabel') }}</label>
               <InteractiveInput id="systemPrompt" v-model="agent.systemPrompt" @blur="updateAgent" :rows="10"
@@ -554,114 +425,18 @@ const vendorLogos: Record<LlmModelVendor, string | undefined> = {
             </div>
           </div>
         </TabPanel>
-        <TabPanel value="1" v-if="!loadingTests" class="flex h-full">
-          <div class="w-full flex flex-col gap-6 h-full">
-            <div class="flex justify-between">
-              <div class="flex flex-row items-center gap-2">
-                <AgentAvatar v-if="agent" :agent="agent" :desaturated="true" />
-                <div>{{ agent?.name }}</div>
-              </div>
-              <div class="flex flex-row items-center gap-2">
-                <SimpleButton v-if="testCases?.length" shape="square" size="small" @click="$emit('runTests')"
-                  :disabled="runningTests">
-                    <IconPlayerPlay size="20" />
-                    {{ t('runTestsButton') }}
-                </SimpleButton>
-                <SimpleButton v-if="testCases?.length" :variant="editingTestcase ? 'primary' : undefined" shape="square" size="small"
-                  @click="onEditTests" :disabled="runningTests">
-                  <div class="flex flex-row items-center gap-1">
-                    <IconPencil size="20" />
-                    {{ t('editTestsButton') }}
-                  </div>
-                </SimpleButton>
-              </div>
-            </div>
-            <div v-if="!testCases?.length" class="flex flex-col gap-2">
-              <span class="font-bold">{{ t('noTestCasesTitle') }}</span>
-              <span class="">{{ t('noTestCasesDescription') }}</span>
-            </div>
-            <div v-else class="flex flex-col gap-2 min-h-0">
-              <div v-if="editingTestcase" class="flex justify-end items-center h-[50px]">
-                <SimpleButton shape="square" size="small" @click="onNewTestCase">
-                  <IconPlus size="20" />
-                  {{ t('newTestCaseButton') }}
-                </SimpleButton>
-              </div>
-              <div class="flex flex-col gap-2 overflow-y-auto ">
-                <div v-if="testCaseResults?.length" class="flex items-center justify-between border-1 border-auxiliar-gray rounded-xl px-3 py-2 shadow-xs group h-[50px]">
-                  <div>
-                    <span v-if="testSuiteRun?.status == TestSuiteRunStatus.RUNNING">{{ t('running') }}</span>
-                    <span v-else>{{ t('lastExecution') }}: <span class="font-semibold">{{ moment(testSuiteRun?.executedAt).format('D MMM YYYY HH:mm') }}</span></span>
-                  </div>
-                  <div class="flex flex-row items-center gap-4">
-                    <div class="flex flex-row items-center gap-2" v-tooltip.bottom="t('success')">
-                      <IconSquareCheckFilled class="text-success" />
-                      <span>{{ countResultWithStatus(TestCaseResultStatus.SUCCESS) }}</span>
-                    </div>
-                    <div class="flex flex-row items-center gap-2" v-tooltip.bottom="t('failure')">
-                      <IconSquareXFilled class="text-error" />
-                      <span>{{ countResultWithStatus(TestCaseResultStatus.FAILURE) }}</span>
-                    </div>
-                    <div class="flex flex-row items-center gap-2" v-tooltip.bottom="t('error')">
-                      <IconExclamationMark class="text-white bg-warn rounded-md p-0.5" size="20" />
-                      <span>{{ countResultWithStatus(TestCaseResultStatus.ERROR) }}</span>
-                    </div>
-                    <div class="flex flex-row items-center gap-2" v-tooltip.bottom="t('skipped')">
-                      <IconSquareChevronsRightFilled class="text-light-gray" />
-                      <span>{{ countResultWithStatus(TestCaseResultStatus.SKIPPED) }}</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div v-for="testCase in (testCases || [])" :key="testCase.thread.id">
-                  <Animate v-if="deletingTestCaseId === testCase.thread.id" :effect="AnimationEffect.QUICK_SLIDE_DOWN">
-                    <ItemConfirmation class="shadow-none !m-0"
-                      :tooltip="t('deleteTestCaseConfirmation', { testCaseName: testCase.thread.name })"
-                      @confirm="onConfirmDeleteTestCase" @cancel="onCancelDeleteTestCase" />
-                  </Animate>
-                  <Animate v-else-if="renamingTestCaseId === testCase.thread.id" :effect="AnimationEffect.QUICK_SLIDE_DOWN"
-                    class="w-full">
-                    <SidebarEditor :value="testCase.thread.name" :on-save="onSaveTestCaseName"
-                      :on-cancel="onCancelRenameTestCase" class="w-full" />
-                  </Animate>
-                  <div v-else
-                    class="border-1 border-auxiliar-gray rounded-xl px-3 py-2 cursor-pointer shadow-xs group h-[50px]"
-                    @click="selectTestCase(testCase.thread.id)"
-                    :class="{ '!border-abstracta': selectedTestCaseId === testCase.thread.id }">
-                    <div class="flex items-center justify-between h-full">
-                      <span class="flex-1">{{ testCase.thread.name }}</span>
-                      <div class="flex flex-row items-center gap-2">
-                        <TestCaseStatus :status="findTestCaseResult(testCase.thread.id)?.status" />
-                        <AgentTestcaseMenu :test-case="testCase"
-                          :active="activeTestCaseMenuId === testCase.thread.id"
-                          @toggle-active="() => toggleTestCaseMenu(testCase.thread.id)"
-                          @close-menu="() => closeTestCaseMenu()"
-                          :items="editingTestcase ? [
-                            {
-                              label: t('renameTestCaseTooltip'),
-                              tablerIcon: IconPencil,
-                              command: () => onRenameTestCase(testCase)
-                            },
-                            {
-                              label: t('deleteTestCaseTooltip'),
-                              tablerIcon: IconTrash,
-                              command: () => onDeleteTestCase(testCase)
-                            }
-                          ] : [
-                            {
-                              label: t('runSingleTestMenuItem'),
-                              tablerIcon: IconPlayerPlay,
-                              command: () => $emit('runSingleTest', testCase.thread.id),
-                              disabled: runningTests
-                            }
-                          ]" />
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </div>
+        <TabPanel value="1" v-if="!loadingTests" class="flex flex-col w-full h-full">
+          <AgentTestcases
+            v-if="editingTestcase"
+            :agent="agent"
+            @run-test-case="(testCaseThreadId: number) => $emit('runSingleTest', testCaseThreadId)"
+            @run-tests="$emit('runTests')"
+            @show-past-executions="showPastExecutions = true"
+            @test-case-deleted="onTestCaseDeleted"
+          />
+          <AgentTestcaseResults v-else
+            @close-results="$emit('editingTestcase', true)"
+          />
         </TabPanel>
       </TabPanels>
     </FlexCard>
@@ -694,22 +469,19 @@ const vendorLogos: Record<LlmModelVendor, string | undefined> = {
     </div>
   </Dialog>
   <AgentImportDialog v-model:visible="showImportAgent" @import="onImportAgent" />
+  <AgentPastExecutionsDialog v-if="agent" v-model:visible="showPastExecutions" :agent-id="agent.id" @select-execution="onSelectExecution" />
 </template>
 
-<i18n lang="json">{
+<i18n lang="json">
+{
   "en": {
-    "shareTooltip": "Share",
-    "unshareTooltip": "Unshare",
-    "editAgentTitle": "Edit {name}",
     "nameLabel": "Name",
     "descriptionLabel": "Description",
-    "modelLabel": "Model",
     "systemPromptLabel": "Instructions",
     "saving": "Saving...",
     "namePlaceholder": "Enter a name for the agent",
     "descriptionPlaceholder": "What does this agent do?",
     "systemPromptPlaceholder": "Write the instructions for this agent",
-    "public": "Public",
     "private": "Private",
     "shareConfirmationTitle": "Do you want to make this agent public?",
     "shareInvalidAttrs": "To share the agent you need to specify {invalidAttrs}.",
@@ -734,49 +506,20 @@ const vendorLogos: Record<LlmModelVendor, string | undefined> = {
     "changeTeamConfirmationTitle": "Change the team of this agent from {oldTeam} to {newTeam}?",
     "changeTeamConfirmationMessage": "When you change the team of an agent only the users in the new team will be able to use it.",
     "changeTeam": "Change team",
-    "temperatureLabel": "Temperature",
-    "reasoningEffortLabel": "Reasoning",
-    "preciseTemperature": "Precise",
-    "neutralTemperature": "Neutral",
-    "creativeTemperature": "Creative",
-    "lowEffort": "Low",
-    "mediumEffort": "Medium",
-    "highEffort": "High",
     "editAgentTabTitle": "Edit",
     "testsTabTitle": "Tests",
-    "noTestCasesTitle": "You don't have test cases for this agent yet",
-    "noTestCasesDescription": "Create your first test case to validate that the agent meets the expected requirements.",
-    "editTestsButton": "Edit",
-    "runTestsButton": "Run all",
-    "runSingleTestMenuItem": "Run",
-    "editTestCaseTooltip": "Edit",
-    "renameTestCaseTooltip": "Rename",
-    "deleteTestCaseTooltip": "Delete",
-    "deleteTestCaseConfirmation": "Delete {testCaseName}?",
-    "newTestCaseButton": "Add",
-    "lastExecution": "Last execution",
-    "noTestCasesResults": "No test cases results yet",
-    "running": "Running...",
     "exportAgent": "Export",
     "importAgent": "Import",
-    "success": "Success",
-    "failure": "Failed",
-    "error": "Error running",
-    "skipped": "Skipped"
+    "testSpec": "Test case specification"
   },
   "es": {
-    "shareTooltip": "Compartir",
-    "unshareTooltip": "Dejar de compartir",
-    "editAgentTitle": "Editar {name}",
     "nameLabel": "Nombre",
     "descriptionLabel": "Descripción",
-    "modelLabel": "Modelo",
     "systemPromptLabel": "Instrucciones",
     "saving": "Guardando...",
     "namePlaceholder": "Ingresa el nombre del agente",
     "descriptionPlaceholder": "¿Qué hace este agente?",
     "systemPromptPlaceholder": "Escribe las instrucciones de este agente",
-    "public": "Público",
     "private": "Privado",
     "shareConfirmationTitle": "¿Quieres hacer este agente público?",
     "shareConfirmationMessageGlobal": "Cuando haces un agente público, este será visible en la página de inicio de Tero para que todos podamos beneficiarnos de lo que has creado.\n\nAdemás, todas las modificaciones futuras al agente estarán disponibles inmediatamente para el resto de sus usuarios.",
@@ -801,37 +544,14 @@ const vendorLogos: Record<LlmModelVendor, string | undefined> = {
     "changeTeamConfirmationTitle": "¿Quieres cambiar el equipo de este agente de {oldTeam} a {newTeam}?",
     "changeTeamConfirmationMessage": "Cuando cambias el equipo de un agente, solo lo podrán usar los usuarios del nuevo equipo.",
     "changeTeam": "Cambiar equipo",
-    "temperatureLabel": "Temperatura",
-    "reasoningEffortLabel": "Razonamiento",
-    "preciseTemperature": "Preciso",
-    "neutralTemperature": "Neutro",
-    "creativeTemperature": "Creativo",
-    "lowEffort": "Bajo",
-    "mediumEffort": "Medio",
-    "highEffort": "Alto",
     "editAgentTabTitle": "Editar",
     "testsTabTitle": "Tests",
-    "noTestCasesTitle": "Aún no tienes test cases para este agente",
-    "noTestCasesDescription": "Crea tu primer test case para validar que el agente cumple los requisitos esperados.",
-    "editTestsButton": "Editar",
-    "runTestsButton": "Ejecutar todos",
-    "runSingleTestMenuItem": "Ejecutar",
-    "editTestCaseTooltip": "Editar",
-    "renameTestCaseTooltip": "Renombrar",
-    "deleteTestCaseTooltip": "Eliminar",
-    "deleteTestCaseConfirmation": "¿Eliminar {testCaseName}?",
-    "newTestCaseButton": "Agregar",
-    "lastExecution": "Última ejecución",
-    "noTestCasesResults": "No hay resultados de ejecución aún",
-    "running": "Ejecutando...",
     "exportAgent": "Exportar",
     "importAgent": "Importar",
-    "success": "Pasó",
-    "failure": "Falló",
-    "error": "Error al ejecutar",
-    "skipped": "Omitido"
+    "testSpec": "Especificación del test case"
   }
-}</i18n>
+}
+</i18n>
 
 <style scoped lang="scss">
 @import '@/assets/styles.css';
@@ -842,31 +562,5 @@ const vendorLogos: Record<LlmModelVendor, string | undefined> = {
 
 :deep(.p-inputnumber.loading) .p-inputtext {
   @apply animate-glowing
-}
-
-:deep(.p-select-list) {
-  gap: 8px !important;
-}
-
-:deep(.p-select-option) {
-  padding: 0 !important;
-}
-
-:deep(.p-select-option.p-select-option-selected) {
-  background: transparent !important;
-}
-
-:deep(.p-select-option.p-focus) {
-  background: transparent !important;
-  border-color: transparent !important;
-}
-
-.selected-option {
-  background-color: #f4f4f4;
-}
-
-:deep(.p-select-list-container) {
-  max-height: none!important;
-  height: 100%!important;
 }
 </style>

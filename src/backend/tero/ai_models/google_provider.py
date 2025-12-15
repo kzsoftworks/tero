@@ -1,7 +1,5 @@
-import io
 from typing import Optional
 
-from langchain_core.embeddings import Embeddings
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_google_genai import ChatGoogleGenerativeAI
 

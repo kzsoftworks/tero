@@ -7,13 +7,20 @@ const route = useRoute();
 const { t } = useI18n();
 
 onBeforeMount(() => {
-  const { code, state } = route.query;
-  window.opener.postMessage({
+  const { state, error, code } = route.query;
+  const channel = new BroadcastChannel('oauth_channel');
+  try {
+    channel.postMessage({
       type: 'oauth_callback',
       toolId: route.params.toolId,
-      code: code,
       state: state,
-    }, window.location.origin);
+      error: error,
+      code: code,
+    });
+  } finally {
+    channel.close();
+    window.close();
+  }
 });
 </script>
 
@@ -23,7 +30,7 @@ onBeforeMount(() => {
   </div>
 </template>
 
-<i18n>
+<i18n lang="json">
   {
     "en": {
       "processingAuthentication": "Processing authentication..."

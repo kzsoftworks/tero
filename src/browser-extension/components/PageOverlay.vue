@@ -1,6 +1,7 @@
 <script lang="ts" setup>
-defineProps<{ minimized?: boolean }>()
 import headerBg from '../assets/header.webp'
+
+defineProps<{ minimized?: boolean }>()
 </script>
 
 <template>
@@ -9,9 +10,9 @@ import headerBg from '../assets/header.webp'
             <slot name="minimizedContent" />
         </div>
         <div v-else>
-            <div class="flex flex-row items-center p-4 bg-cover bg-center bg-no-repeat rounded-tl-3xl text-white"
+            <div class="flex flex-row items-center p-2 bg-cover bg-center bg-no-repeat rounded-tl-3xl text-white"
                 :style="`background-image: url(${headerBg})`">
-                <img src="../assets/logo.webp" style="height: 38px" />
+                <img src="../assets/logo.webp" style="height: 48px" />
                 <div class="flex-auto text-right items-center justify-end flex gap-4">
                     <slot name="headerActions"/>
                 </div>
@@ -22,5 +23,6 @@ import headerBg from '../assets/header.webp'
             <slot name="content" />
         </main>
         <slot name="modalsContainer" />
+        <slot name="footer" />
     </div>
 </template>

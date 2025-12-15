@@ -55,7 +55,7 @@ const collapsed = ref<boolean>(true);
         "reject": "Reject",
         "invitationText": "You have been invited to join the team",
         "acceptText": "By accepting, the leaders of this team will be able to",
-        "usageMetricsText": "See your usage metrics in AI Console.",
+        "usageMetricsText": "See your metrics of hours saved with AI and the number of chats.",
         "editAgentsText": "Edit the agents you publish in this new team.",
         "acceptButton": "Accept invitation",
         "rejectButton": "Reject"
@@ -65,7 +65,7 @@ const collapsed = ref<boolean>(true);
         "reject": "Rechazar",
         "invitationText": "Has sido invitado para unirte al equipo",
         "acceptText": "Al aceptar, los lideres de este equipo podrán",
-        "usageMetricsText": "Ver tus horas IA utilizadas en la consola de IA.",
+        "usageMetricsText": "Ver las métricas de tus horas ahorradas con IA y el número de chats.",
         "editAgentsText": "Editar los agentes que publiques en este nuevo equipo.",
         "acceptButton": "Aceptar invitación",
         "rejectButton": "Rechazar"

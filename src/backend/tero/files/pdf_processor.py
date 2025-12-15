@@ -16,10 +16,11 @@ from ..core.env import env
 from ..files.domain import File
 from ..files.file_quota import FileQuota, QuotaExceededError
 
-logger = logging.getLogger(__name__)
 
+logger = logging.getLogger(__name__)
 T = TypeVar('T', bound='BoundedElement')
 PAGES_CHUNK_SIZE = 50
+
 
 @dataclass
 class BoundingBox:
@@ -45,6 +46,7 @@ class BoundingBox:
     def contains(self, other: 'BoundingBox') -> bool:
         return (other.y >= self.y and other.y + other.height <= self.y + self.height)
 
+
 @dataclass
 class BoundedElement(Generic[T]):
     content: str
@@ -55,6 +57,7 @@ class BoundedElement(Generic[T]):
     @classmethod
     def create(cls: type[T], content: str, y: float, height: float, bbox: Optional[BoundingBox] = None) -> T:
         return cls(content=content, y=y, height=height, bbox=bbox)
+
 
 @dataclass
 class BoundedParagraph(BoundedElement['BoundedParagraph']):
@@ -75,6 +78,7 @@ class BoundedParagraph(BoundedElement['BoundedParagraph']):
             return cls.create(content=content, y=bbox.y, height=bbox.height, bbox=bbox)
         else:
             return cls.create(content=content, y=0.0, height=0.0, bbox=None)
+
 
 @dataclass
 class BoundedTable(BoundedElement['BoundedTable']):
@@ -177,6 +181,7 @@ class BasePDFProcessor(abc.ABC):
             logger.warning(f"Failed to write PDF chunk {start_page}-{end_page}: {e}. Using original content.")
             return content
 
+
 class BasicPDFProcessor(BasePDFProcessor):
 
     def extract_content(self, upload_file: File, file_quota: FileQuota) -> str:
@@ -213,6 +218,7 @@ class BasicPDFProcessor(BasePDFProcessor):
 
     def _clean_pypdfium2_content(self, content: str) -> str:
         return content.replace("\r", "").strip()
+
 
 class EnhancedPDFProcessor(BasePDFProcessor):
     
@@ -299,4 +305,3 @@ class EnhancedPDFProcessor(BasePDFProcessor):
     def _combine_elements_content(self, elements: list[BoundedElement]) -> str:
         elements.sort(key=lambda x: x.y)
         return "\n".join(element.content for element in elements)
-        

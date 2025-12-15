@@ -381,6 +381,9 @@ onMounted(async () => {
                   <h3 class="text-light-gray mb-2">{{ isSearching ? t('searchingAgents') : t('noAgentsFound') }}</h3>
                   <p class="text-light-gray/70 max-w-md">{{ isSearching ? t('searchingAgentsDescription') : t('noAgentsFoundDescription') }}</p>
                 </div>
+                <div v-else-if="currentTabId === TabId.OWN && !currentAgents.length && !isLoading" class="flex flex-col items-center text-center">
+                  <p class="text-light-gray pt-5">{{ t('noAgentsCreated') }}</p>
+                </div>
                 <div class="column-gap" v-else>
                   <DiscoverSkeleton v-if="isLoading && !loadingMoreAgents" />
                   <template v-else>
@@ -431,7 +434,8 @@ onMounted(async () => {
       "searchingAgents": "Searching agents",
       "searchingAgentsDescription": "We are searching agents that match your search",
       "noAgentsFound": "No agents found",
-      "noAgentsFoundDescription": "We couldn't find any agents that match your search. Please try a different search term"
+      "noAgentsFoundDescription": "We couldn't find any agents that match your search. Please try a different search term",
+      "noAgentsCreated": "You haven't created agents"
     },
     "es": {
       "discoverAgents": "A descubrir",
@@ -447,7 +451,8 @@ onMounted(async () => {
       "searchingAgents": "Buscando agentes",
       "searchingAgentsDescription": "Estamos buscando agentes que coincidan con tu búsqueda",
       "noAgentsFound": "No se encontraron agentes",
-      "noAgentsFoundDescription": "No pudimos encontrar agentes que coincidan con tu búsqueda. Por favor, intenta con otro término de búsqueda"
+      "noAgentsFoundDescription": "No pudimos encontrar agentes que coincidan con tu búsqueda. Por favor, intenta con otro término de búsqueda",
+      "noAgentsCreated": "No has creado agentes"
     }
   }
 </i18n>

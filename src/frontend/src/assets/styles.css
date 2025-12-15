@@ -95,6 +95,7 @@
 .p-popover:before {
   @apply !border-b-auxiliar-gray;
 }
+
 .p-popover {
   @apply !border-auxiliar-gray;
 }
@@ -151,7 +152,7 @@
   @apply border-error;
 }
 
-.p-autocomplete .p-inputtext:focus + .p-autocomplete-dropdown {
+.p-autocomplete .p-inputtext:focus+.p-autocomplete-dropdown {
   @apply !outline-abstracta !ring-abstracta !border-abstracta !border-l-0;
 }
 
@@ -170,12 +171,12 @@
 /* Override Prime Vue style */
 
 /* Hide last row border */
-.p-datatable .p-datatable-tbody > tr:last-child > td {
+.p-datatable .p-datatable-tbody>tr:last-child>td {
   @apply !border-b-0;
 }
 
 .p-datatable-header-cell,
-.p-datatable .p-datatable-tbody > tr > td {
+.p-datatable .p-datatable-tbody>tr>td {
   @apply !border-auxiliar-gray;
 }
 
@@ -197,6 +198,7 @@
   #sidebar {
     @apply !w-2xs;
   }
+
   .p-tablist {
     @apply w-xl overflow-x-auto;
   }
@@ -214,6 +216,7 @@
   .grid-wrapper {
     @apply w-4xl;
   }
+
   .column-gap {
     @apply grid-cols-3;
   }
@@ -224,6 +227,7 @@
   .grid-wrapper {
     @apply w-6xl;
   }
+
   .column-gap {
     @apply grid-cols-4;
   }
@@ -235,34 +239,46 @@
 .formatted-text {
   @apply leading-snug;
 }
+
 .formatted-text hr {
   @apply hidden;
 }
-.formatted-text h1, .formatted-text h2 {
+
+.formatted-text h1,
+.formatted-text h2 {
   @apply text-xl my-2.5;
 }
-.formatted-text h3, .formatted-text h4 {
+
+.formatted-text h3,
+.formatted-text h4 {
   @apply my-0.5 font-normal;
 }
+
 .formatted-text ul,
 .message ol {
   @apply mb-2.5;
 }
+
 .formatted-text p {
   @apply my-1.5;
 }
+
 .formatted-text li {
   @apply ml-4 my-2;
 }
+
 .formatted-text ul li ul li {
   @apply list-[circle];
 }
+
 .formatted-text strong {
   @apply font-medium;
 }
+
 .formatted-text p br {
   @apply my-2.5;
 }
+
 .copy-code-btn svg {
   @apply size-4 mr-1;
 }

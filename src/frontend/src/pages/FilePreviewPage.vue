@@ -129,7 +129,7 @@ const findFile = async () : Promise<[File, ProcessedContent]> => {
     })()])
   } else {
     return await Promise.all([api.downloadAgentToolFile(parsedAgentId.value, toolId!, fileId), (async () => {
-      const docFile = await api.findAgentDocToolFile(parsedAgentId.value, toolId!, fileId)
+      const docFile = await api.findAgentToolFile(parsedAgentId.value, toolId!, fileId)
       return new ProcessedContent(docFile.status, docFile.fileProcessor, docFile.processedContent)
     })()])
   }
@@ -179,7 +179,7 @@ const reprocess = async () => {
     const agentId = parsedAgentId.value
     await api.configureAgentTool(agentId, new AgentToolConfig(toolId!, {advancedFileProcessing: newProcessor === FileProcessor.ENHANCED}))
     await api.updateAgentToolFile(agentId, toolId!, fileId, new File([], originalFile.value!.name, { type: originalFile.value!.type }))
-    let toolFile = await api.findAgentDocToolFile(agentId, toolId!, fileId)
+    let toolFile = await api.findAgentToolFile(agentId, toolId!, fileId)
     toolFile = await awaitFileProcessingCompletes(toolFile)
     processedContent.value = toolFile.processedContent
     const quotaExceeded = await checkQuotaExceeded(toolFile)
@@ -194,7 +194,7 @@ const reprocess = async () => {
 
 const awaitFileProcessingCompletes = async (toolFile: DocToolFile) => {
   while (toolFile.status === FileStatus.PENDING) {
-    toolFile = await api.findAgentDocToolFile(parsedAgentId.value, toolId!, fileId)
+    toolFile = await api.findAgentToolFile(parsedAgentId.value, toolId!, fileId)
     if (toolFile.status === FileStatus.PENDING) {
       await new Promise((resolve) => setTimeout(resolve, 1000))
     }

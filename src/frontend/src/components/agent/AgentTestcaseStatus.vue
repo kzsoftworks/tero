@@ -67,7 +67,8 @@ const statusConfig = computed(() => {
     </div>
 </template>
 
-<i18n lang="json">{
+<i18n lang="json">
+{
     "en": {
         "running": "Running",
         "success": "Success",
@@ -84,5 +85,5 @@ const statusConfig = computed(() => {
         "pending": "Pendiente",
         "skipped": "Omitido"
     }
-}</i18n>
-
+}
+</i18n>

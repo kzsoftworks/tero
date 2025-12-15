@@ -1,14 +1,14 @@
 from datetime import timedelta
-from httpx import AsyncClient
 from typing import Callable
+
+from httpx import AsyncClient
 
 from .common import *
 
-_avoid_import_reorder = True
-from tero.usage.api import IMPACT_PATH, USAGE_PATH
-from tero.usage.domain import AgentImpactItem, UserImpactItem, ImpactSummary, UsageSummary, AgentUsageItem, UserUsageItem, PRIVATE_AGENT_ID
 from tero.external_agents.domain import PublicExternalAgent
 from tero.teams.domain import Role, Team, MY_TEAM_ID
+from tero.usage.api import IMPACT_PATH, USAGE_PATH
+from tero.usage.domain import AgentImpactItem, UserImpactItem, ImpactSummary, UsageSummary, AgentUsageItem, UserUsageItem, PRIVATE_AGENT_ID
 
 
 async def test_user_budget(client: AsyncClient):

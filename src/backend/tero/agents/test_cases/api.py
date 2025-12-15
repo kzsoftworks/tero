@@ -1,27 +1,36 @@
-import logging
+import asyncio
+from contextlib import AsyncExitStack
 from datetime import datetime, timezone
-from typing import Annotated, List, cast
+import logging
+import re
+from typing import Annotated, List, Optional, cast
 
-from fastapi import APIRouter, Depends, HTTPException, status, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.responses import StreamingResponse
 from sqlmodel.ext.asyncio.session import AsyncSession
+from sse_starlette.event import ServerSentEvent
 
 from ...core.auth import get_current_user
 from ...core.repos import get_db
 from ...users.domain import User
+from ...threads.domain import Thread, ThreadMessage, ThreadMessageOrigin, ThreadMessagePublic, MAX_THREAD_NAME_LENGTH
+from ...threads.engine import AgentEngine
 from ...threads.repos import ThreadMessageRepository, ThreadRepository
-from ...threads.domain import Thread, ThreadMessage, ThreadMessagePublic
-from ..api import find_editable_agent, AGENT_PATH
-from .domain import TestCase, PublicTestCase, NewTestCaseMessage, UpdateTestCaseMessage, UpdateTestCase, TestSuiteRun, TestSuiteRunStatus, RunTestSuiteRequest, TestCaseResult
-from .repos import TestCaseRepository, TestCaseResultRepository, TestSuiteRunRepository
-from .runner import cleanup_orphaned_suite_run, TestCaseRunner
-
-
-TEST_CASES_PATH = f"{AGENT_PATH}/tests"
+from ...tools.oauth import ToolOAuthRequest, build_tool_oauth_request_http_exception
+from ..api import AGENT_PATH, find_editable_agent
+from ..domain import Agent, CLONE_SUFFIX
+from ..repos import AgentRepository
+from .clone import clone_test_case
+from .domain import TestCase, PublicTestCase, NewTestCaseMessage, UpdateTestCaseMessage, UpdateTestCase, TestSuiteRun, TestSuiteRunStatus, RunTestSuiteRequest, TestCaseResult, TestSuiteEventType
+from .events import listen_for_suite_run_events, monitor_cancellation
+from .name_generation import generate_test_case_name
+from .repos import TestCaseRepository, TestCaseResultRepository, TestSuiteRunRepository, TestSuiteRunEventRepository
+from .runner import BackgroundTestSuiteRunner
 
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+TEST_CASES_PATH = f"{AGENT_PATH}/tests"
 
 
 @router.get(TEST_CASES_PATH, response_model=List[PublicTestCase])
@@ -37,6 +46,11 @@ async def add_test_case(agent_id: int, user: Annotated[User, Depends(get_current
         db: Annotated[AsyncSession, Depends(get_db)]) -> TestCase:
     agent = await find_editable_agent(agent_id, user, db)
     test_cases_repo = TestCaseRepository(db)
+
+    empty_test_case = await test_cases_repo.find_empty_test_case(agent.id)
+    if empty_test_case:
+        return empty_test_case
+
     test_cases = await test_cases_repo.find_by_agent(agent.id)
     thread = await ThreadRepository(db).add(
         Thread(
@@ -66,17 +80,17 @@ async def get_test_suite_runs(agent_id: int, user: Annotated[User, Depends(get_c
 
 @router.post(TEST_SUITE_RUNS_PATH, status_code=status.HTTP_201_CREATED)
 async def run_test_suite(
-    agent_id: int, 
+    agent_id: int,
     request: RunTestSuiteRequest,
     user: Annotated[User, Depends(get_current_user)],
-    db: Annotated[AsyncSession, Depends(get_db)],
-    background_tasks: BackgroundTasks
-) -> StreamingResponse:
+    db: Annotated[AsyncSession, Depends(get_db)]
+) -> TestSuiteRun:
     agent = await find_editable_agent(agent_id, user, db)
+
     all_test_cases = await TestCaseRepository(db).find_by_agent(agent.id)
     if not all_test_cases:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST)
-    
+
     if request.test_case_ids is not None:
         test_case_ids_set = set(request.test_case_ids)
         test_cases_to_run = [tc for tc in all_test_cases if tc.thread_id in test_case_ids_set]
@@ -84,12 +98,20 @@ async def run_test_suite(
             raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST)
     else:
         test_cases_to_run = all_test_cases
-    
+
     suite_repo = TestSuiteRunRepository(db)
     last_suite = await suite_repo.find_latest_by_agent_id(agent.id)
     if last_suite and last_suite.status == TestSuiteRunStatus.RUNNING:
         raise HTTPException(status_code=status.HTTP_409_CONFLICT)
-    
+
+    # Initialize engine to trigger any tool authentication requirements before creating suite run
+    try:
+        engine = AgentEngine(agent, user.id, db)
+        async with AsyncExitStack() as stack:
+            await engine.load_tools(stack)
+    except ToolOAuthRequest as e:
+        raise build_tool_oauth_request_http_exception(e)
+
     suite_run = await suite_repo.add(TestSuiteRun(
         agent_id=agent.id,
         status=TestSuiteRunStatus.RUNNING,
@@ -99,13 +121,34 @@ async def run_test_suite(
         error_tests=0,
         skipped_tests=0
     ))
-    
-    background_tasks.add_task(cleanup_orphaned_suite_run, suite_run.id, agent.id)
-    
-    return StreamingResponse(
-        TestCaseRunner(db).run_test_suite_stream(agent, all_test_cases, test_cases_to_run, user.id, suite_run),
-        media_type="text/event-stream",
-    )
+
+    stop_event = asyncio.Event()
+    runner = BackgroundTestSuiteRunner()
+    all_test_case_ids = [tc.thread_id for tc in all_test_cases]
+    test_case_ids_to_run = [tc.thread_id for tc in test_cases_to_run]
+
+    async def run_wrapper():
+        monitor_task = asyncio.create_task(
+            monitor_cancellation(suite_run.id, agent.id, stop_event)
+        )
+        try:
+            await runner.run(
+                agent.id,
+                all_test_case_ids,
+                test_case_ids_to_run,
+                user.id,
+                suite_run.id,
+                stop_event
+            )
+        finally:
+            stop_event.set()
+            try:
+                await monitor_task
+            except Exception:
+                pass
+
+    asyncio.create_task(run_wrapper())
+    return suite_run
 
 
 TEST_SUITE_RUN_PATH = f"{TEST_SUITE_RUNS_PATH}/{{suite_run_id}}"
@@ -125,6 +168,70 @@ async def _find_test_suite_run(suite_run_id: int, agent_id: int, user: User, db:
     return suite_run
 
 
+@router.delete(TEST_SUITE_RUN_PATH, status_code=status.HTTP_204_NO_CONTENT)
+async def delete_test_suite_run(agent_id: int, suite_run_id: int, user: Annotated[User, Depends(get_current_user)],
+        db: Annotated[AsyncSession, Depends(get_db)]):
+    suite_run = await _find_test_suite_run(suite_run_id, agent_id, user, db)
+    await TestSuiteRunRepository(db).delete(suite_run)
+
+
+@router.post(f"{TEST_SUITE_RUN_PATH}/stop", status_code=status.HTTP_200_OK)
+async def stop_test_suite_run(
+        agent_id: int,
+        suite_run_id: int,
+        user: Annotated[User, Depends(get_current_user)],
+        db: Annotated[AsyncSession, Depends(get_db)]):
+    suite_run = await _find_test_suite_run(suite_run_id, agent_id, user, db)
+    if suite_run.status != TestSuiteRunStatus.RUNNING:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="suiteRunNotRunning")
+
+    suite_run.status = TestSuiteRunStatus.CANCELLING
+    await TestSuiteRunRepository(db).save(suite_run)
+
+
+@router.get(f"{TEST_SUITE_RUN_PATH}/stream")
+async def stream_test_suite_updates(
+    agent_id: int,
+    suite_run_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)]
+) -> StreamingResponse:
+    await _find_test_suite_run(suite_run_id, agent_id, user, db)
+
+    async def event_generator():
+        events_repo = TestSuiteRunEventRepository(db)
+        last_event_id = None
+        stop_event = asyncio.Event()
+
+        try:
+            async for notification in listen_for_suite_run_events(suite_run_id, stop_event):
+                if notification is None:
+                    events = await events_repo.find_current_test_events(suite_run_id)
+                else:
+                    events = await events_repo.find_by_suite_run(suite_run_id, after_id=last_event_id)
+
+                for db_event in events:
+                    yield ServerSentEvent(
+                        event=db_event.type,
+                        data=db_event.data
+                    ).encode()
+                    last_event_id = db_event.id
+                    if db_event.type in [TestSuiteEventType.COMPLETE.value, TestSuiteEventType.ERROR.value]:
+                        stop_event.set()
+                        return
+
+        except asyncio.CancelledError:
+            stop_event.set()
+        except Exception:
+            logger.exception(f"Error streaming events for suite {suite_run_id}")
+            stop_event.set()
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream"
+    )
+
+
 TEST_SUITE_RUN_RESULTS_PATH = f"{TEST_SUITE_RUN_PATH}/results"
 
 
@@ -140,20 +247,20 @@ TEST_SUITE_RUN_RESULT_MESSAGE_PATH = f"{TEST_SUITE_RUN_RESULTS_PATH}/{{result_id
 
 @router.get(TEST_SUITE_RUN_RESULT_MESSAGE_PATH, response_model=List[ThreadMessagePublic])
 async def get_test_suite_run_result_messages(
-    agent_id: int, 
-    suite_run_id: int, 
+    agent_id: int,
+    suite_run_id: int,
     result_id: int,
     user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)]
 ) -> List[ThreadMessage]:
     await _find_test_suite_run(suite_run_id, agent_id, user, db)
-    
+
     results_repo = TestCaseResultRepository(db)
     result = await results_repo.find_by_id_and_suite_run_id(result_id, suite_run_id)
-    
+
     if result is None or result.thread_id is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND)
-    
+
     return await ThreadMessageRepository(db).find_by_thread_id(result.thread_id)
 
 
@@ -163,10 +270,10 @@ TEST_CASE_PATH = f"{TEST_CASES_PATH}/{{test_case_id}}"
 @router.get(TEST_CASE_PATH, response_model=PublicTestCase)
 async def find_test_case(agent_id: int, test_case_id: int, user: Annotated[User, Depends(get_current_user)],
         db: Annotated[AsyncSession, Depends(get_db)]) -> TestCase:
-    return await _find_test_case(test_case_id, agent_id, user, db)
+    return await find_test_case_by_id(test_case_id, agent_id, user, db)
 
 
-async def _find_test_case(test_case_id: int, agent_id: int, user: User, db: Annotated[AsyncSession, Depends(get_db)]) -> TestCase:
+async def find_test_case_by_id(test_case_id: int, agent_id: int, user: User, db: AsyncSession) -> TestCase:
     await find_editable_agent(agent_id, user, db)
     test_case = await TestCaseRepository(db).find_by_id(test_case_id, agent_id)
     if test_case is None:
@@ -174,11 +281,43 @@ async def _find_test_case(test_case_id: int, agent_id: int, user: User, db: Anno
     return test_case
 
 
+TEST_CASE_CLONE_PATH = f"{TEST_CASE_PATH}/clone"
+
+
+@router.post(TEST_CASE_CLONE_PATH, response_model=PublicTestCase, status_code=status.HTTP_201_CREATED)
+async def clone_test_case_endpoint(
+    agent_id: int,
+    test_case_id: int,
+    user: Annotated[User, Depends(get_current_user)],
+    db: Annotated[AsyncSession, Depends(get_db)]
+) -> TestCase:
+    original_test_case = await find_test_case_by_id(test_case_id, agent_id, user, db)
+    clone_name = _build_cloned_test_case_name(original_test_case.thread.name)
+    return await clone_test_case(original_test_case, agent_id, user.id, db, test_case_name=clone_name)
+
+
+def _build_cloned_test_case_name(original_name: Optional[str]) -> str:
+    base_name = (original_name or "Test Case").strip()
+    match = re.search(r"^(.*?)\s*\(copy(?: (\d+))?\)$", base_name)
+
+    if match:
+        name_prefix = match.group(1).strip()
+        copy_number = int(match.group(2)) + 1 if match.group(2) else 2
+        suffix = f"({CLONE_SUFFIX} {copy_number})"
+    else:
+        name_prefix = base_name
+        suffix = f"({CLONE_SUFFIX})"
+
+    truncated_prefix = name_prefix[:(MAX_THREAD_NAME_LENGTH - len(suffix) - 1)].rstrip()
+
+    return f"{truncated_prefix} {suffix}".strip()
+
+
 @router.put(TEST_CASE_PATH, response_model=PublicTestCase)
 async def update_test_case(agent_id: int, test_case_id: int, update: UpdateTestCase,
         user: Annotated[User, Depends(get_current_user)],
         db: Annotated[AsyncSession, Depends(get_db)]) -> TestCase:
-    test_case = await _find_test_case(test_case_id, agent_id, user, db)
+    test_case = await find_test_case_by_id(test_case_id, agent_id, user, db)
     test_case.thread.name = update.name
     await ThreadRepository(db).update(test_case.thread)
     return test_case
@@ -186,8 +325,8 @@ async def update_test_case(agent_id: int, test_case_id: int, update: UpdateTestC
 
 @router.delete(TEST_CASE_PATH, status_code=status.HTTP_204_NO_CONTENT)
 async def delete_test_case(agent_id: int, test_case_id: int, user: Annotated[User, Depends(get_current_user)],
-        db: Annotated[AsyncSession, Depends(get_db)]) -> None:
-    test_case = await _find_test_case(test_case_id, agent_id, user, db)
+        db: Annotated[AsyncSession, Depends(get_db)]):
+    test_case = await find_test_case_by_id(test_case_id, agent_id, user, db)
     await TestCaseRepository(db).delete(test_case)
 
 
@@ -197,15 +336,21 @@ TEST_CASE_MESSAGES_PATH = f"{TEST_CASE_PATH}/messages"
 @router.get(TEST_CASE_MESSAGES_PATH, response_model=List[ThreadMessagePublic])
 async def find_messages(agent_id: int, test_case_id: int, user: Annotated[User, Depends(get_current_user)],
         db: Annotated[AsyncSession, Depends(get_db)]) -> List[ThreadMessage]:
-    test_case = await _find_test_case(test_case_id, agent_id, user, db)
+    test_case = await find_test_case_by_id(test_case_id, agent_id, user, db)
     return await ThreadMessageRepository(db).find_by_thread_id(test_case.thread_id)
 
 
 @router.post(TEST_CASE_MESSAGES_PATH, response_model=ThreadMessagePublic)
 async def add_message(agent_id: int, test_case_id: int, message: NewTestCaseMessage, user: Annotated[User, Depends(get_current_user)],
         db: Annotated[AsyncSession, Depends(get_db)]) -> ThreadMessage:
-    test_case = await _find_test_case(test_case_id, agent_id, user, db)
+    test_case = await find_test_case_by_id(test_case_id, agent_id, user, db)
     repo = ThreadMessageRepository(db)
+
+    last_message = await repo.find_last_by_thread_id(test_case.thread_id)
+    last_message_origin = last_message.origin if last_message else ThreadMessageOrigin.AGENT
+    if not last_message_origin != message.origin:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST)
+
     added_message = await repo.add(ThreadMessage(
         thread_id=test_case.thread_id,
         text=message.text,
@@ -213,7 +358,32 @@ async def add_message(agent_id: int, test_case_id: int, message: NewTestCaseMess
     ))
     test_case.last_update = added_message.timestamp
     await TestCaseRepository(db).save(test_case)
+    await _generate_test_case_name(test_case, user, db)
     return added_message
+
+
+async def _generate_test_case_name(test_case: TestCase, user: User, db: AsyncSession):
+    if not test_case.is_default_name():
+        return
+
+    messages = await ThreadMessageRepository(db).find_by_thread_id(test_case.thread_id)
+    user_message = next((m for m in messages if m.origin == ThreadMessageOrigin.USER and m.text and m.text.strip()), None)
+    agent_message = next((m for m in messages if m.origin == ThreadMessageOrigin.AGENT and m.text and m.text.strip()), None)
+    if not user_message or not agent_message:
+        return
+
+    agent = cast(Agent, await AgentRepository(db).find_by_id(test_case.agent_id))
+    try:
+        generated_name = await generate_test_case_name(agent, user_message.text.strip(), agent_message.text.strip(), user.id, db)
+    except Exception:
+        logger.warning("Failed to generate test case name for test case %s", test_case.thread_id, exc_info=True)
+        return
+
+    trimmed_name = generated_name.strip()
+    if not trimmed_name or trimmed_name == test_case.thread.name:
+        return
+    test_case.thread.name = trimmed_name
+    await ThreadRepository(db).update(test_case.thread)
 
 
 TEST_CASE_MESSAGE_PATH = f"{TEST_CASE_MESSAGES_PATH}/{{message_id}}"
@@ -222,7 +392,7 @@ TEST_CASE_MESSAGE_PATH = f"{TEST_CASE_MESSAGES_PATH}/{{message_id}}"
 @router.put(TEST_CASE_MESSAGE_PATH, response_model=ThreadMessagePublic)
 async def update_message(agent_id: int, test_case_id: int, message_id: int, message: UpdateTestCaseMessage, user: Annotated[User, Depends(get_current_user)],
         db: Annotated[AsyncSession, Depends(get_db)]) -> ThreadMessage:
-    test_case = await _find_test_case(test_case_id, agent_id, user, db)
+    test_case = await find_test_case_by_id(test_case_id, agent_id, user, db)
     repo = ThreadMessageRepository(db)
     test_case_message = await repo.find_by_id(message_id)
     if test_case_message is None or test_case_message.thread_id != test_case.thread_id:

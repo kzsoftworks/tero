@@ -38,5 +38,5 @@ app.use(Toast, {})
 app.directive('click-outside', clickOutside);
 app.mount("body")
 
-let elem : HTMLBodyElement = document.getElementsByTagName("body")[0]
+let elem: HTMLBodyElement = document.getElementsByTagName("body")[0]
 elem!.onbeforeunload = () => app.unmount()

@@ -20,25 +20,24 @@ from ..core.env import env
 from ..core.repos import get_db
 from ..files.api import build_file_download_response
 from ..files.domain import File, FileStatus, FileMetadata, FileProcessor, FileMetadataWithContent
-from ..files.parser import add_encoding_to_content_type, extract_file_text
 from ..files.file_quota import FileQuota, CurrentQuota, QuotaExceededError
+from ..files.parser import add_encoding_to_content_type, extract_file_text
 from ..files.repos import FileRepository
 from ..tools.oauth import ToolOAuthRequest, build_tool_oauth_request_http_exception
-from ..usage.domain import Usage, UsageType, MessageUsage    
+from ..usage.domain import Usage, UsageType, MessageUsage
 from ..usage.repos import UsageRepository
 from ..users.domain import User
 from .domain import ThreadListItem, Thread, ThreadMessage, ThreadMessageOrigin, ThreadUpdate,\
     ThreadMessagePublic, ThreadMessageFile, ThreadMessageUpdate, AgentActionEvent, AgentFileEvent,\
     AgentMessageEvent, ThreadTranscriptionResult
 from .engine import build_thread_name, AgentEngine
-from .time_saved_estimation import estimate_minutes_saved
 from .repos import ThreadRepository, ThreadMessageRepository, ThreadMessageFileRepository
+from .time_saved_estimation import estimate_minutes_saved
 
-
-THREADS_PATH = f"{BASE_PATH}/threads"
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
+THREADS_PATH = f"{BASE_PATH}/threads"
 active_streaming_connections: dict[int, asyncio.Event] = {}
 
 
@@ -137,7 +136,7 @@ async def add_message(thread_id: int, request: Request, user: Annotated[User, De
     current_usage = await UsageRepository(db).find_current_month_user_usage_usd(user.id)
     if current_usage >= user.monthly_usd_limit:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, detail="quotaExceeded")
-    
+
     form = await request.form()
     message_text = cast(str, form.get("text", ""))
     message_origin = cast(str, form.get("origin", "USER"))
@@ -155,7 +154,7 @@ async def add_message(thread_id: int, request: Request, user: Annotated[User, De
         engine = AgentEngine(thread.agent, user.id, db)
         async with AsyncExitStack() as stack:
             await engine.load_tools(stack)
-        
+
         initial_thread_message = ThreadMessage(
             thread_id=thread.id,
             text=message_text,
@@ -164,7 +163,7 @@ async def add_message(thread_id: int, request: Request, user: Annotated[User, De
         )
         repo = ThreadMessageRepository(db)
         user_message = await repo.add(initial_thread_message)
-        
+
         await _attach_existing_files_to_message(existing_files, user_message, db)
         await _handle_file_contents(files, user_message, user, thread, engine, db)
         user_message = await repo.refresh_with_files(user_message)
@@ -175,7 +174,7 @@ async def add_message(thread_id: int, request: Request, user: Annotated[User, De
         )
     except ToolOAuthRequest as e:
         raise build_tool_oauth_request_http_exception(e)
-    
+
     except QuotaExceededError:
         raise HTTPException(status.HTTP_429_TOO_MANY_REQUESTS, detail="quotaExceeded")
 
@@ -214,8 +213,8 @@ async def _handle_file_contents(files: List[UploadFile], user_message: ThreadMes
                 file.processed_content = await extract_file_text(file, file_quota)
                 file.status = FileStatus.PROCESSED
                 saved_file = await file_repo.add(file)
-                await ThreadMessageFileRepository(db).add(ThreadMessageFile(thread_message_id=user_message.id, file_id=saved_file.id))                    
-            
+                await ThreadMessageFileRepository(db).add(ThreadMessageFile(thread_message_id=user_message.id, file_id=saved_file.id))
+
             finally:
                 await UsageRepository(db).add(pdf_parsing_usage)
 
@@ -224,7 +223,7 @@ async def _agent_response(message: ThreadMessage, thread: Thread, user_id: int, 
         -> AsyncIterator[bytes]:
     message_usage = None
     yield ServerSentEvent(event="userMessage", data=json.dumps({
-        "id": message.id, 
+        "id": message.id,
         "files": [FileMetadata.from_file(f.file).model_dump(mode="json", by_alias=True) for f in message.files if f.file]
     })).encode()
     try:
@@ -234,16 +233,19 @@ async def _agent_response(message: ThreadMessage, thread: Thread, user_id: int, 
         repo = ThreadMessageRepository(db)
         message_usage = MessageUsage(user_id=user_id, agent_id=thread.agent_id, model_id=thread.agent.model_id, message_id=message.id)
         thread_messages = await repo.find_previous_messages(message)
-            
+
         if len(thread_messages) == 0:
             thread.name = await build_thread_name(message.text, message_usage, db)
             await ThreadRepository(db).update(thread)
-            
+
         answer_stream = AgentEngine(thread.agent, user_id, db).answer([*thread_messages, message], message_usage, stop_event)
         complete_answer = ""
         files: List[FileMetadata] = []
+        status_updates: List[AgentActionEvent] = []
+
         async for event in answer_stream:
             if isinstance(event, AgentActionEvent):
+                status_updates.append(event)
                 payload = json.dumps(event.model_dump(mode="json", by_alias=True))
                 yield ServerSentEvent(event="status", data=payload).encode()
             elif isinstance(event, AgentFileEvent):
@@ -272,11 +274,12 @@ async def _agent_response(message: ThreadMessage, thread: Thread, user_id: int, 
             origin=ThreadMessageOrigin.AGENT,
             parent_id=message.id,
             minutes_saved=minutes_saved,
-            stopped=stop_event.is_set()
+            stopped=stop_event.is_set(),
+            status_updates=[event.model_dump(mode="json", by_alias=True) for event in status_updates] if status_updates else None
         ))
         for f in files:
             await ThreadMessageFileRepository(db).add(ThreadMessageFile(thread_message_id=answer.id, file_id=f.id))
-        
+
         yield ServerSentEvent(event="metadata", data=json.dumps({
             "answerMessageId": answer.id,
             "files": [f.model_dump(mode="json", by_alias=True) for f in files],
@@ -284,7 +287,7 @@ async def _agent_response(message: ThreadMessage, thread: Thread, user_id: int, 
             "stopped": answer.stopped
         })).encode()
     except Exception:
-        logger.exception("Problem answering message")
+        logger.exception(f"Problem answering message in thread {thread.id}")
         yield ServerSentEvent(event="error").encode()
     finally:
         await UsageRepository(db).add(message_usage)

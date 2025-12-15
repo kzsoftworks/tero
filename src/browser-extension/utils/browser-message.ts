@@ -87,15 +87,17 @@ export class ActivateAgent extends BrowserMessage {
 export class AgentActivation extends BrowserMessage {
   agent: Agent
   success: boolean
+  errorStatus?: number
 
-  constructor(agent: Agent, success: boolean) {
+  constructor(agent: Agent, success: boolean, errorStatus?: number) {
     super("agentActivation")
     this.agent = agent
     this.success = success
+    this.errorStatus = errorStatus
   }
 
   public static fromJsonObject(obj: any): AgentActivation {
-    return new AgentActivation(Agent.fromJsonObject(obj.agent), obj.success)
+    return new AgentActivation(Agent.fromJsonObject(obj.agent), obj.success, obj.errorStatus)
   }
 }
 

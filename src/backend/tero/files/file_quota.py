@@ -11,8 +11,10 @@ from ..usage.domain import Usage
 
 logger = logging.getLogger(__name__)
 
+
 class QuotaExceededError(Exception):
     pass
+
 
 class CurrentQuota:
     def __init__(self, current_usage: float, user_quota: float):
@@ -36,5 +38,3 @@ class FileQuota:
     
     def has_reached_quota_limit(self) -> bool:
         return self.current_quota.current_usage + self.pdf_parsing_usage.usd_cost > self.current_quota.user_quota
-
-    

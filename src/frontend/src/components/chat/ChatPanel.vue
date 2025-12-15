@@ -1,7 +1,7 @@
 <script lang="ts" setup>
 import { ref, onMounted, reactive, watch, computed } from 'vue';
 import { useI18n } from 'vue-i18n'
-import { ApiService, Agent, ThreadMessageOrigin, ThreadMessage, ThreadMessagePart, HttpError, findManifest } from '@/services/api';
+import { ApiService, Agent, ThreadMessageOrigin, ThreadMessage, ThreadMessagePart, HttpError, findManifest, TeamRoleStatus, Role } from '@/services/api';
 import { useChatStore } from '@/composables/useChatStore';
 import { useAgentStore } from '@/composables/useAgentStore';
 import { useBudgetStore } from '@/composables/useBudgetStore';
@@ -9,9 +9,10 @@ import { useErrorHandler } from '@/composables/useErrorHandler';
 import { ChatUiMessage, type StatusUpdate } from '@tero/common/components/chat/ChatMessage.vue';
 import { useAgentPromptStore } from '@/composables/useAgentPromptStore';
 import ChatPanelHeader from './ChatPanelHeader.vue';
-import { AuthenticationWindowCloseError, AuthenticationCancelError, handleOAuthRequestsIn } from '@/services/toolOAuth';
+import { AuthenticationError, handleOAuthRequestsIn } from '@/services/toolOAuth';
 import { UserFeedback, AgentPrompt, UploadedFile, FileStatus } from '../../../../common/src/utils/domain';
 import ChatInput from '../../../../common/src/components/chat/ChatInput.vue';
+import { loadUserProfile } from '@/composables/useUserProfile';
 
 const props = defineProps({
   threadId: {
@@ -43,6 +44,7 @@ const chatInputRef = ref<InstanceType<typeof ChatInput>>()
 const attachedFiles = ref<UploadedFile[]>([]);
 const feedbackLoadingMessageId = ref<number | undefined>(undefined);
 const showPastChats = ref<boolean>(false);
+const shareablePrompts = ref(false)
 
 const chat = computed(() => chatsStore.currentChat);
 
@@ -53,7 +55,11 @@ const starterPrompts = computed(() =>
 onMounted(async () => {
   agentsPromptStore.prompts = [];
   await loadChatData(props.threadId);
-});
+  const user = await loadUserProfile()
+  if (user?.teams.some(t => t.status === TeamRoleStatus.ACCEPTED && t.role === Role.TEAM_OWNER)) {
+    shareablePrompts.value = true
+  }
+})
 
 const loadChatData = async (threadId: number) => {
   try {
@@ -75,7 +81,7 @@ function mapThreadMessageToChatUi(
   parent?: ChatUiMessage
 ): ChatUiMessage {
   const files = threadMsg.files || [] as UploadedFile[]
-  const uiMsg = new ChatUiMessage(threadMsg.text, files, threadMsg.origin === ThreadMessageOrigin.USER, true, true, [], parent, threadMsg.id, threadMsg.minutesSaved, threadMsg.feedbackText, threadMsg.hasPositiveFeedback, threadMsg.stopped);
+  const uiMsg = new ChatUiMessage(threadMsg.text, files, threadMsg.origin === ThreadMessageOrigin.USER, true, true, [], parent, threadMsg.id, threadMsg.minutesSaved, threadMsg.feedbackText, threadMsg.hasPositiveFeedback, threadMsg.stopped, threadMsg.statusUpdates);
   for (const childThread of threadMsg.children) {
     const childUi = mapThreadMessageToChatUi(childThread, uiMsg)
     uiMsg.children.push(childUi)
@@ -154,6 +160,14 @@ const sendUserMessage = async (text:string, files: UploadedFile[] = [], editMess
   const parentMessageId = appendMessage(userUIMessage, editMessageId)
   const answerMsg = reactive(ChatUiMessage.agentMessage(undefined))
   userUIMessage.addChild(answerMsg)
+
+  const startTime = new Date()
+  const initialStatusUpdate: StatusUpdate = {
+    action: 'statusProcessing',
+    timestamp: startTime
+  }
+  answerMsg.addStatusUpdate(initialStatusUpdate)
+
   await updateChat(chat.value!)
   await updateAgent(chat.value!.agent.id)
   try {
@@ -245,6 +259,8 @@ const processAnswer = async (answer: AsyncIterable<ThreadMessagePart>, answerMsg
       userUIMessage.id = part.userMessage.id
       userUIMessage.files = part.userMessage.files || []
     } else if (part.metadata) {
+      const lastStatus = answerMsg.statusUpdates[answerMsg.statusUpdates.length - 1]
+      lastStatus.timestamp = new Date()
       answerMsg.completeStatus()
       answerMsg.id = part.metadata.answerMessageId
       answerMsg.minutesSaved = part.metadata.minutesSaved
@@ -261,6 +277,7 @@ const processAnswer = async (answer: AsyncIterable<ThreadMessagePart>, answerMsg
         timestamp: new Date()
       }
       answerMsg.addStatusUpdate(statusUpdate)
+      scrollToLastChatMessage()
     }
   }
 }
@@ -270,10 +287,8 @@ const processAnswerError = async (e: unknown, answerMsg: ChatUiMessage, userUIMe
   let text = ""
   if (e instanceof HttpError && e.status === 429 && e.message.includes('quotaExceeded')) {
     text = t('quotaExceeded', { contactEmail })
-  } else if (e instanceof AuthenticationWindowCloseError) {
-    text = t('authenticationWindowClosed')
-  } else if (e instanceof AuthenticationCancelError) {
-    text = t('authenticationCancelled')
+  } else if (e instanceof AuthenticationError) {
+    text = t(e.errorCode)
   } else {
     console.error(e)
     text = t('agentAnswerError', { contactEmail })
@@ -429,7 +444,7 @@ const handleViewFile = (file: UploadedFile) => {
         }"
         :is-answering="streamingResponse"
         :enable-prompts="true"
-        :shareable-prompts="true"
+        :shareable-prompts="shareablePrompts"
         @send="onSendUserMessage"
         @files-change="handleFileChange"
         @stop="stopResponse">
@@ -438,28 +453,22 @@ const handleViewFile = (file: UploadedFile) => {
   </FlexCard>
 </template>
 
-<i18n>
+<i18n lang="json">
   {
     "en": {
       "authenticationWindowClosed": "The authentication window was closed before completing the process. Please, try again and keep the authentication popup window open until it finishes.",
       "authenticationCancelled": "The authentication was cancelled. Please, try again and complete the authentication to use this agent.",
+      "authenticationAccessDenied": "The authentication was denied by the MCP server. Please verify that you actually have the permissions necessary to use it.",
       "agentAnswerError": "I am currently unable to complete your request. You can try again and if the issue persists contact [support](mailto:{contactEmail}?subject=Tero%20issue)",
       "quotaExceeded": "You have reached the monthly usage quota. Contact [support](mailto:{contactEmail}?subject=Tero%20Monthly%20Limit) to increase your monthly quota or wait for the next month.",
-      "managePromptsTooltip": "Manage Prompts",
-      "promptVariablesTitle": "Set prompt variables",
-      "promptVariablePlaceholder": "Set a value for the variable",
-      "confirm": "Confirm",
       "starterText": "Hi! 👋 \n How can I help you?"
     },
     "es": {
       "authenticationWindowClosed": "La ventana de autenticación se cerró antes de completar el proceso. Por favor, inténtelo de nuevo y mantenga abierta la ventana emergente de autenticación hasta que termine.",
       "authenticationCancelled": "La autenticación fue cancelada. Por favor, inténtelo de nuevo y complete la autenticación para usar este agente o esta herramienta.",
+      "authenticationAccessDenied": "La autenticación fue denegada por el servidor MCP. Por favor, verifica que tengas los permisos necesarios para usarlo.",
       "agentAnswerError": "Ahora no puedo completar tu pedido. Puedes intentar de nuevo y si el problema persiste contactar a [soporte](mailto:{contactEmail}?subject=Tero%20issue)",
       "quotaExceeded": "Ha alcanzado la cuota de uso mensual. Contacte a [soporte](mailto:{contactEmail}?subject=Tero%20Monthly%20Limit) para aumentar su cuota mensual o espere al próximo mes.",
-      "managePromptsTooltip": "Administrar Prompts",
-      "promptVariablesTitle": "Configura las variables del prompt",
-      "promptVariablePlaceholder": "Ingresa un valor para la variable",
-      "confirm": "Confirmar",
       "starterText": "Hola! 👋 \n ¿Cómo puedo ayudarte?"
     }
   }

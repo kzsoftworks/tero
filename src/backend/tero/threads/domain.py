@@ -3,15 +3,18 @@ from datetime import datetime, timezone
 from enum import Enum
 from typing import Any, Optional, List, Union
 
+from pydantic import field_serializer
 from sqlalchemy import Column, Text
-from sqlmodel import SQLModel, Field, Relationship, Index
+from sqlmodel import SQLModel, Field, Relationship, Index, JSON
 
 from ..agents.domain import Agent, AgentListItem
 from ..core.domain import CamelCaseModel
 from ..files.domain import FileMetadata, File
 from ..users.domain import User
 
+
 MAX_THREAD_NAME_LENGTH = 80
+
 
 class BaseThread(SQLModel, abc.ABC):
     id: int = Field(primary_key=True, default=None)
@@ -41,6 +44,14 @@ class Thread(BaseThread, table=True):
 
     def set_default_name(self):
         self.name = f"Chat #{self.id}"
+
+    @field_serializer('creation')
+    def serialize_creation(self, value: datetime) -> str:
+        if value.tzinfo is not None:
+            value = value.astimezone(timezone.utc)
+        naive_value = value.replace(tzinfo=None)
+        return naive_value.isoformat()
+
 
 class ThreadListItem(BaseThread, CamelCaseModel):
     agent: AgentListItem
@@ -88,7 +99,7 @@ class ThreadMessage(CamelCaseModel, table=True):
     minutes_saved: Optional[int] = None
     feedback_text: Optional[str] = None
     has_positive_feedback: Optional[bool] = None
-    
+    status_updates: Optional[List] = Field(default=None, sa_column=Column(JSON))
     files: List["ThreadMessageFile"] = Relationship(back_populates="thread_message")
 
     def update_with(self, update: ThreadMessageUpdate):
@@ -119,6 +130,7 @@ class ThreadMessagePublic(CamelCaseModel, table=False):
     feedback_text: Optional[str] = None
     has_positive_feedback: Optional[bool] = None
     stopped: bool = False
+    status_updates: Optional[List] = None
 
     @staticmethod
     def from_message(message: ThreadMessage) -> 'ThreadMessagePublic':

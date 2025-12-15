@@ -9,10 +9,10 @@
     },
     // use this since 23.7.0 builds locally and takes a long time
     "nodejs": "23.6.1",
-    "pnpm":   "latest"
+    "pnpm": "latest"
   },
   "env": {
-    "VENV_DIR":             "$DEVBOX_PROJECT_ROOT/src/backend/.venv",
+    "VENV_DIR": "$DEVBOX_PROJECT_ROOT/src/backend/.venv",
     "DEVBOX_PYPROJECT_DIR": "$DEVBOX_PROJECT_ROOT/src/backend"
   },
   "shell": {
@@ -70,10 +70,6 @@
         "[ ! -e browser-copilot.zip ] || rm browser-copilot.zip",
         "zip -r browser-copilot.zip *"
       ],
-      "update-python": [
-        "cd src/backend",
-        "poetry update"
-      ],
       "check": [
         "cd src/backend",
         "poetry run pyright"
@@ -92,4 +88,3 @@
     }
   }
 }
-

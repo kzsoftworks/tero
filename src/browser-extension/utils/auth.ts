@@ -45,8 +45,13 @@ class PopupNavigator implements INavigator {
 class PopupHandler implements IWindow {
 
   async navigate(params: NavigateParams): Promise<NavigateResponse> {
-    let url = await browser.identity.launchWebAuthFlow({ interactive: true, url: params.url })
-    return { url }
+    try {
+      let url = await browser.identity.launchWebAuthFlow({ interactive: true, url: params.url })
+      return { url }
+    } catch (e: any) {
+      console.error(`Error launching web auth flow for url ${params.url}`, e)
+      throw e
+    }
   }
 
   close(): void {
@@ -57,7 +62,7 @@ class PopupHandler implements IWindow {
 export interface AuthConfig {
   url: string
   clientId: string
-  scope: string 
+  scope: string
 }
 
 export class AuthService {
@@ -126,6 +131,15 @@ export class AuthService {
 
   public async login(): Promise<void> {
     await this.userManager.signinPopup()
+  }
+
+  public async ensureAuthenticated(): Promise<User> {
+    const user = await this.getUser()
+    if (!user) {
+      await this.login()
+      return (await this.getUser())!
+    }
+    return user
   }
 
 }

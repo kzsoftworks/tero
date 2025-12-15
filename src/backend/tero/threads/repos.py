@@ -117,7 +117,7 @@ class ThreadMessageRepository:
             ))
         ret = await self._db.exec(stmt)
         return ret.one()
-    
+
     async def update(self, thread_message: ThreadMessage):
         self._db.add(thread_message)
         await self._db.commit()
@@ -132,6 +132,16 @@ class ThreadMessageRepository:
             ))
         ret = await self._db.exec(stmt)
         return list(ret.all())
+
+    async def find_last_by_thread_id(self, thread_id: int) -> Optional[ThreadMessage]:
+        stmt = (
+            select(ThreadMessage)
+            .where(ThreadMessage.thread_id == thread_id)
+            .order_by(col(ThreadMessage.timestamp).desc())
+            .limit(1)
+        )
+        ret = await self._db.exec(stmt)
+        return ret.first()
 
     async def find_previous_messages(self, message: ThreadMessage) -> List[ThreadMessage]:
         parents: List[ThreadMessage] = []
@@ -170,14 +180,14 @@ class ThreadMessageRepository:
             [Thread.agent_id == agent_id],
             [Thread.user_id == user_id],
         ]
-        
+
         for strategy_conditions in strategies:
             if len(messages) >= limit:
                 break
 
             conditions = strategy_conditions + [~col(ThreadMessage.id).in_([msg.id for msg in messages])] if messages else []
             messages.extend(await self._find_feedback_messages_with_conditions(conditions, limit - len(messages)))
-        
+
         return messages[:limit]
 
     async def _find_feedback_messages_with_conditions(self, additional_conditions, limit: int) -> List[ThreadMessage]:
@@ -194,7 +204,7 @@ class ThreadMessageRepository:
             .order_by(col(ThreadMessage.timestamp).desc())
             .limit(limit)
         )
-        
+
         ret = await self._db.exec(stmt)
         return [item for message, parent in ret.all() for item in [parent, message]]
 
@@ -220,7 +230,7 @@ class ThreadMessageFileRepository:
         await self._db.commit()
         await self._db.refresh(thread_message_file)
         return thread_message_file
-    
+
     async def find_by_thread_id_and_file_id(self, thread_id: int, file_id: int) -> Optional[ThreadMessageFile]:
         stmt = (select(ThreadMessageFile)
             .join(ThreadMessage, and_(ThreadMessageFile.thread_message_id == ThreadMessage.id, ThreadMessage.thread_id == thread_id))

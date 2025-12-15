@@ -20,21 +20,21 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     sa.Enum('RUNNING', 'SUCCESS', 'FAILURE', name='testsuiterunstatus').create(op.get_bind())
-    op.create_table('test_suite_run',
-                    sa.Column('id', sa.Integer(), nullable=False),
-                    sa.Column('agent_id', sa.Integer(), nullable=False),
-                    sa.Column('status', postgresql.ENUM('RUNNING', 'SUCCESS', 'FAILURE', name='testsuiterunstatus',
-                                                        create_type=False), nullable=False),
-                    sa.Column('executed_at', sa.DateTime(), nullable=False),
-                    sa.Column('completed_at', sa.DateTime(), nullable=True),
-                    sa.Column('total_tests', sa.Integer(), nullable=False),
-                    sa.Column('passed_tests', sa.Integer(), nullable=False),
-                    sa.Column('failed_tests', sa.Integer(), nullable=False),
-                    sa.Column('error_tests', sa.Integer(), nullable=False),
-                    sa.Column('skipped_tests', sa.Integer(), nullable=False),
-                    sa.ForeignKeyConstraint(['agent_id'], ['agent.id'], ),
-                    sa.PrimaryKeyConstraint('id')
-                    )
+    op.create_table(
+        'test_suite_run',
+        sa.Column('id', sa.Integer(), nullable=False),
+        sa.Column('agent_id', sa.Integer(), nullable=False),
+        sa.Column('status', postgresql.ENUM('RUNNING', 'SUCCESS', 'FAILURE', name='testsuiterunstatus',
+                                            create_type=False), nullable=False),
+        sa.Column('executed_at', sa.DateTime(), nullable=False),
+        sa.Column('completed_at', sa.DateTime(), nullable=True),
+        sa.Column('total_tests', sa.Integer(), nullable=False),
+        sa.Column('passed_tests', sa.Integer(), nullable=False),
+        sa.Column('failed_tests', sa.Integer(), nullable=False),
+        sa.Column('error_tests', sa.Integer(), nullable=False),
+        sa.Column('skipped_tests', sa.Integer(), nullable=False),
+        sa.ForeignKeyConstraint(['agent_id'], ['agent.id'], ),
+        sa.PrimaryKeyConstraint('id'))
     op.create_index('ix_test_suite_run_agent_id_executed_at', 'test_suite_run', ['agent_id', 'executed_at'],
                     unique=False)
     op.drop_constraint('test_case_result_pkey', 'test_case_result', type_='primary')

@@ -64,7 +64,7 @@ class OpenIdConfig:
         async with self._http_cli.get(jwks_uri) as ret_resp:
             ret_resp.raise_for_status()
             self._keys = await ret_resp.json()
-        self.keys_last_update = datetime.datetime.now(datetime.UTC)
+        self._last_update = datetime.datetime.now(datetime.UTC)
 
 
 async def get_http_cli() -> AsyncGenerator[aiohttp.ClientSession, None]:
@@ -95,12 +95,6 @@ async def _decode_token(token: str, openid_config: Annotated[OpenIdConfig, Depen
 async def get_current_user(token: Annotated[Optional[str], Depends(auth_scheme)],
         open_id_config: Annotated[Optional[OpenIdConfig], Depends(_get_openid_config)],
         db: Annotated[AsyncSession, Depends(get_db)]) -> User:
-    if config_url is None:
-        user = await UserRepository(db).find_by_username('test')
-        if user is None:
-            raise _build_auth_exception()
-        return user
-
     try:
         if not token or not open_id_config:
             logger.warning("No token or open_id_config could be found")

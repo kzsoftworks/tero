@@ -1,6 +1,6 @@
 import abc
-from typing import Optional, List, cast
 from datetime import datetime, timezone
+from typing import Optional, List, cast
 
 from sqlmodel import SQLModel, Field, Relationship
 
@@ -12,6 +12,7 @@ class BaseUser(SQLModel, abc.ABC):
     username: str = Field(index=True, max_length=50)
     name: Optional[str] = Field(max_length=100, default=None, index=True)
 
+
 class User(BaseUser, table=True):
     monthly_usd_limit: int
     monthly_hours: int = Field(default=160)
@@ -22,11 +23,13 @@ class User(BaseUser, table=True):
     def is_member_of(self, team_id: int) -> bool:
         return team_id == GLOBAL_TEAM_ID or any(cast(Team, tr.team).id == team_id and tr.status == TeamRoleStatus.ACCEPTED for tr in self.team_roles)
 
+
 class UserListItem(BaseUser):
 
     @staticmethod
     def from_user(user: Optional[User]) -> Optional['UserListItem']:
         return UserListItem.model_validate(user) if user else None
+
 
 class UserProfile(SQLModel):
     teams: List[PublicTeamRole]

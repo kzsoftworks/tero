@@ -1,12 +1,13 @@
 from typing import List, Optional
 
+from sqlalchemy.orm import selectinload
 from sqlmodel import select, delete, and_, col
 from sqlmodel.ext.asyncio.session import AsyncSession
-from sqlalchemy.orm import selectinload
 
 from ..core.repos import scalar, attr
 from ..users.domain import User
 from .domain import Team, TeamRole, TeamRoleStatus, TeamUser, Role, GLOBAL_TEAM_ID
+
 
 class TeamRepository:
 

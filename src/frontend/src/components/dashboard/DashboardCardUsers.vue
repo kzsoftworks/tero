@@ -35,7 +35,8 @@ const isSearchingUser = ref<boolean>(false)
 const searchUser = ref<string>('')
 const roleNames = computed<Record<string, string>>(() => ({
   [Role.TEAM_OWNER]: t('teamOwner'),
-  [Role.TEAM_MEMBER]: t('teamMember')
+  [Role.TEAM_MEMBER]: t('teamMember'),
+  [Role.TEAM_EDITOR]: t('teamEditor')
 }))
 
 const showAddUserModal = ref<boolean>(false)
@@ -251,6 +252,7 @@ const handleConfirmDeleteUser = async () => {
     "noUsersFound": "No users found",
     "teamOwner": "Leader",
     "teamMember": "Member",
+    "teamEditor": "Editor",
     "addUser": "Add",
     "cancel": "Cancel",
     "delete": "Remove",
@@ -272,6 +274,7 @@ const handleConfirmDeleteUser = async () => {
     "noUsersFound": "No se encontraron usuarios",
     "teamOwner": "Líder",
     "teamMember": "Miembro",
+    "teamEditor": "Editor",
     "addUser": "Agregar",
     "cancel": "Cancelar",
     "delete": "Remover",

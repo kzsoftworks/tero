@@ -12,20 +12,22 @@ const fetchResponse = async (url: string, options?: RequestInit) => {
     if (ret.headers.get('Content-Type') === 'application/json') {
       let json = JSON.parse(body)
       if ('detail' in json) {
-        throw new HttpServiceError(json.detail)
+        throw new HttpServiceError(json.detail, ret.status)
       }
     }
-    throw new HttpServiceError()
+    throw new HttpServiceError(undefined, ret.status)
   }
   return ret
 }
 
 export class HttpServiceError extends Error {
   detail?: string
+  status?: number
 
-  constructor(detail?: string) {
+  constructor(detail?: string, status?: number) {
     super()
     this.detail = detail
+    this.status = status
   }
 
 }
@@ -53,7 +55,7 @@ async function* fetchSSEStream(resp: Response, url: string, options?: RequestIni
     for (const event of events) {
       if (event.event === "error") {
         console.warn(`Problem while reading stream response from ${options?.method ? options.method : 'GET'} ${url}`, event)
-        throw new HttpServiceError()
+        throw new HttpServiceError(undefined, resp.status)
       }
       if (event.event || event.data) {
         yield event

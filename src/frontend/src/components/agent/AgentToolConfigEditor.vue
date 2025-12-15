@@ -5,7 +5,7 @@ import type { JSONSchema7, JSONSchema7Definition } from 'json-schema'
 import { useErrorHandler } from '@/composables/useErrorHandler'
 import Ajv, { type ErrorObject } from 'ajv'
 import addFormats from 'ajv-formats'
-import { AuthenticationWindowCloseError, AuthenticationCancelError, handleOAuthRequestsIn } from '@/services/toolOAuth';
+import { AuthenticationError, handleOAuthRequestsIn } from '@/services/toolOAuth';
 import { AgentToolConfig, AgentTool } from '@/services/api'
 
 export class EditingToolConfig {
@@ -116,9 +116,13 @@ const toolMessage = computed(() => {
   return ret != toolMessageKey ? ret : null
 })
 
-const isFileProperty = (toolProp: JSONSchema7Definition) : boolean => {
+const isFileArrayProperty = (toolProp: JSONSchema7Definition) : boolean => {
   const toolPropSchema = js7(toolProp)
   return toolPropSchema?.type === 'array' && (js7(toolPropSchema?.items)?.$ref?.endsWith('/File') ?? false)
+}
+
+const isFileProperty = (toolProp: JSONSchema7Definition) : boolean => {
+  return js7(toolProp)?.$ref?.endsWith('/File') ?? false
 }
 
 const isEnumProperty = (toolProp: JSONSchema7Definition) : boolean => {
@@ -179,15 +183,23 @@ const saveToolConfig = async () => {
     // avoid saving tool when requires files and none have been uploaded
     if (savedConfig.value !== mutableConfig && !(Object.values(toolProperties.value).some(isFileProperty) && !savedConfig.value)) {
       partialSave = true
-      ret = await handleOAuthRequestsIn(async () => await api.configureAgentTool(props.toolConfig.agentId, ret), api)
+      ret = await handleOAuthRequestsIn(async () => {
+        // resetting this flag since we want to allow retry saving tool config to re open oauth popup, or allow cancelling oauth
+        // when oauth popup is closed or just ignored
+        saving.value = true
+        try {
+          return await api.configureAgentTool(props.toolConfig.agentId, ret)
+        } finally {
+          // here is where we re enable save and cancel buttons in case oauth popup is showed or auth completed
+          saving.value = false
+        }
+      }, api)
       partialSave = false
     }
     emit('update', ret)
   } catch (error) {
-    if (error instanceof AuthenticationWindowCloseError) {
-      validationErrors.value = t('authenticationWindowClosed')
-    } else if (error instanceof AuthenticationCancelError) {
-      validationErrors.value = t('authenticationCancelled')
+    if (error instanceof AuthenticationError) {
+      validationErrors.value = t(error.errorCode)
     } else if (error instanceof ValidationErrors) {
       validationErrors.value = error.message
     } else if (error instanceof HttpError && error.status === 400) {
@@ -259,20 +271,43 @@ class ValidationErrors extends Error {
     <div class="flex flex-col gap-2 mb-4">
       <div v-if="toolMessage" class="text-light-gray text-sm tool-message mb-2" v-html="toolMessage"></div>
       <div v-for="propName in Object.keys(toolProperties)" :key="propName" class="form-field relative">
-        <div v-if="isFileProperty(toolProperties[propName])">
+        <div v-if="isFileArrayProperty(toolProperties[propName]) || isFileProperty(toolProperties[propName])">
           <label :for="propName">{{ translateToolPropertyName(toolConfig.tool.id, propName) }}</label>
-          <AgentToolFilesEditor :id="propName" :agent-id="toolConfig.agentId" :tool-id="toolConfig.tool.id" :configured-tool="savedConfig != undefined" :contact-email="contactEmail" :view-mode="viewMode" :on-before-file-upload="onBeforeFileUpload" :on-after-file-remove="onAfterFileRemove"/>
+          <AgentToolFilesEditor
+              :id="propName"
+              :agent-id="toolConfig.agentId"
+              :tool-id="toolConfig.tool.id"
+              :configured-tool="savedConfig != undefined"
+              :contact-email="contactEmail"
+              :view-mode="viewMode"
+              :allowed-extensions="(toolProperties[propName] as any)?.['x-allowed-extensions']"
+              :max-files="isFileProperty(toolProperties[propName]) ? 1 : undefined"
+              :on-before-file-upload="onBeforeFileUpload"
+              :on-after-file-remove="onAfterFileRemove"/>
         </div>
         <div v-else-if="isBooleanProperty(toolProperties[propName])" class="flex items-center gap-2 text-sm">
-          <ToggleSwitch v-model="mutableConfig[propName] as boolean" v-tooltip.bottom="solveToolPropertyTooltip(toolConfig.tool.id, propName, mutableConfig[propName])" :disabled="viewMode" />
+          <ToggleSwitch
+              v-model="mutableConfig[propName] as boolean"
+              v-tooltip.bottom="solveToolPropertyTooltip(toolConfig.tool.id, propName, mutableConfig[propName])"
+              :disabled="viewMode" />
           <span :class="{ 'text-light-gray': !mutableConfig[propName] }">{{ translateToolPropertyName(toolConfig.tool.id, propName) }}</span>
         </div>
         <div v-else-if="isEnumProperty(toolProperties[propName])">
-          <AgentToolConfigEnumPropertyEditor v-model="mutableConfig[propName] as string[]" :id="propName" :label="translateToolPropertyName(toolConfig.tool.id, propName)" :option-values="js7(js7(toolProperties[propName])!.items)!.enum as string[]" :option-labels="translateOptionLabel" :view-mode="viewMode"/>
+          <AgentToolConfigEnumPropertyEditor
+              v-model="mutableConfig[propName] as string[]"
+              :id="propName"
+              :label="translateToolPropertyName(toolConfig.tool.id, propName)"
+              :option-values="js7(js7(toolProperties[propName])!.items)!.enum as string[]"
+              :option-labels="translateOptionLabel"
+              :view-mode="viewMode"/>
         </div>
         <div v-else-if="!isBooleanProperty(toolProperties[propName])" class="flex flex-col gap-1">
           <label :for="propName">{{ translateToolPropertyName(toolConfig.tool.id, propName) }}</label>
-          <InteractiveInput v-model="mutableConfig[propName] as string" :id="propName" :type="isSecretStringProperty(toolProperties[propName]) ? 'password' : 'text'" :disabled="viewMode"/>
+          <InteractiveInput
+              v-model="mutableConfig[propName] as string"
+              :id="propName"
+              :type="isSecretStringProperty(toolProperties[propName]) ? 'password' : 'text'"
+              :disabled="viewMode"/>
         </div>
       </div>
       <div v-if="validationErrors" class="text-error-alt validation-errors" v-html="validationErrors"></div>
@@ -308,6 +343,7 @@ class ValidationErrors extends Error {
       "close": "Close",
       "authenticationWindowClosed": "The authentication window was closed. Please sign in again to configure this tool.",
       "authenticationCancelled": "The authentication was cancelled. Please complete the authentication process to configure this tool.",
+      "authenticationAccessDenied": "The authentication was denied by the MCP server. Please verify that you actually have the permissions necessary to use it.",
       "missingProperty": "A value is required for '{property}'. Please provide one.",
       "invalidPropertyFormat": "Provided '{property}' is not a valid {format}. Please, review the value and try again.",
       "invalidPropertyMinLength": "Provided '{property}' is shorter than {minLength} @:{'character'}. Please, review the value and try again.",
@@ -337,6 +373,7 @@ class ValidationErrors extends Error {
       "close": "Cerrar",
       "authenticationWindowClosed": "La ventana de autenticación se cerró. Por favor, inicie sesión nuevamente para configurar esta herramienta.",
       "authenticationCancelled": "La autenticación fue cancelada. Por favor, complete el proceso de autenticación para configurar esta herramienta.",
+      "authenticationAccessDenied": "La autenticación fue denegada por el servidor MCP. Por favor, verifica que tengas los permisos necesarios para usarlo.",
       "missingProperty": "Se requiere un valor para '{property}'. Por favor proporciona uno.",
       "invalidPropertyFormat": "El valor proporcionado para '{property}' no es válido. Por favor, revise el valor y vuelve a intentarlo.",
       "invalidPropertyMinLength": "El valor proporcionado para '{property}' es más corto que {minLength} @:{'character'}. Por favor, revise el valor y vuelve a intentarlo.",

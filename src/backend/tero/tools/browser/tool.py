@@ -6,17 +6,15 @@ import logging
 import re
 from typing import List, Optional, Any, cast, Annotated
 
-
-from langchain_core.tools import BaseTool, StructuredTool, InjectedToolCallId
-from langchain_core.runnables import RunnableConfig
 from langchain_core.callbacks import AsyncCallbackManagerForToolRun
 from langchain_core.messages import ToolMessage
+from langchain_core.runnables import RunnableConfig
+from langchain_core.tools import BaseTool, StructuredTool, InjectedToolCallId
 from langchain_mcp_adapters.client import MultiServerMCPClient
 from langchain_mcp_adapters.tools import load_mcp_tools
 from sqlmodel.ext.asyncio.session import AsyncSession
 from json_schema_to_pydantic import create_model
 from pydantic import BaseModel
-
 
 from ...core.env import env
 from ...files.domain import File, FileStatus, FileMetadata
@@ -46,7 +44,7 @@ class ScreenshotPersistingTool(BaseTool):
 
     def _run(self, *args: Any, **kwargs: Any) -> Any:
         raise NotImplementedError("Synchronous run not implemented.")
-    
+
     async def _arun(self, *args: Any, config: RunnableConfig,
         run_manager: Optional[AsyncCallbackManagerForToolRun] = None, **kwargs: Any) -> Any:
         result = await self._mcp_tool._arun(*args, config=config, run_manager=run_manager, **kwargs)
@@ -103,7 +101,7 @@ class BrowserTool(AgentTool):
     @asynccontextmanager
     async def load(self) -> AsyncIterator['BrowserTool']:
         server_name = "playwright"
-        client = MultiServerMCPClient({server_name: {"transport": "streamable_http", "url": env.browser_tool_playwright_mcp_url}})
+        client = MultiServerMCPClient({server_name: {"transport": "streamable_http", "url": env.browser_tool_playwright_mcp_url }})
         async with client.session(server_name) as mcp_session:
             self._tools = await load_mcp_tools(mcp_session)
             self._tools = [ScreenshotPersistingTool(cast(StructuredTool, t), self.user_id, self._thread_id, cast(AsyncSession, self._db)) if t.name == "browser_take_screenshot" else t for t in self._tools]

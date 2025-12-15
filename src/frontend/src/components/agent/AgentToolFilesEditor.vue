@@ -14,6 +14,8 @@ const props = defineProps<{
   configuredTool: boolean
   contactEmail?: string
   viewMode?: boolean
+  allowedExtensions?: string[]
+  maxFiles?: number
   onBeforeFileUpload: (filesCount: number) => Promise<void>
   onAfterFileRemove: (filesCount: number) => Promise<void>
 }>()
@@ -21,6 +23,9 @@ const props = defineProps<{
 const { t } = useI18n()
 const api = new ApiService()
 const { handleError } = useErrorHandler()
+
+const defaultAllowedExtensions = ['pdf', 'txt', 'md', 'csv', 'xlsx', 'xls']
+const allowedExtensions = computed(() => props.allowedExtensions ?? defaultAllowedExtensions)
 const attachedFilesError = ref({
   title: '',
   message: ''
@@ -188,12 +193,8 @@ const filteredFiles = computed(() => props.viewMode ? toolFiles.value.filter(f =
       </div>
       <GradientBottom padding="small" v-if="filteredFiles.length >= 5" />
     </div>
-    <div v-if="!viewMode">
-      <FileInput showLabel :attachedFiles="toolFiles" :allowedExtensions="['pdf', 'txt', 'md', 'csv', 'xlsx', 'xls']" @error="attachedFilesError = $event" @files-change="handleFileChange" />
-    </div>
-    <div>
-      <ErrorBox :error="attachedFilesError" />
-    </div>
+    <FileInput v-if="!viewMode" showLabel :attachedFiles="toolFiles" :allowedExtensions="allowedExtensions" :maxFiles="maxFiles" @error="attachedFilesError = $event" @files-change="handleFileChange" />
+    <ErrorBox :error="attachedFilesError" />
   </div>
 </template>
 

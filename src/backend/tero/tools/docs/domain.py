@@ -1,5 +1,7 @@
 from typing import Any
+
 from sqlmodel import Field
+
 from ...core.domain import CamelCaseModel
 
 

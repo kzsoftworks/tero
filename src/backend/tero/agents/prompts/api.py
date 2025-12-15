@@ -7,8 +7,8 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from ...core.api import BASE_PATH
 from ...core.auth import get_current_user
 from ...core.repos import get_db
-from ...users.domain import User
 from ...teams.domain import Role, Team
+from ...users.domain import User
 from ..api import find_agent_by_id
 from ..domain import Agent
 from .domain import AgentPrompt, AgentPromptCreate, AgentPromptPublic, AgentPromptUpdate
@@ -16,7 +16,6 @@ from .repos import AgentPromptRepository
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
 AGENT_PROMPTS_PATH = f"{BASE_PATH}/agents/{{agent_id}}/prompts"
 AGENT_PROMPT_PATH = f"{BASE_PATH}/agents/{{agent_id}}/prompts/{{prompt_id}}"
 
@@ -38,7 +37,15 @@ def _map_public_prompt(agent: Agent, user: User, prompt: AgentPrompt):
 
 
 def _is_editable_prompt(prompt: AgentPrompt, agent: Agent, user: User) -> bool:
-    return prompt.user_id == user.id or (prompt.shared and (agent.user_id == user.id or (agent.team_id is not None and any(tr.role == Role.TEAM_OWNER and cast(Team, tr.team).id == agent.team_id for tr in user.team_roles))))
+    return prompt.user_id == user.id or (
+        prompt.shared and (
+            agent.user_id == user.id or 
+            (agent.team_id is not None and any(
+                tr.role in [Role.TEAM_OWNER, Role.TEAM_EDITOR] and cast(Team, tr.team).id == agent.team_id 
+                for tr in user.team_roles
+            ))
+        )
+    )
 
 
 @router.post(AGENT_PROMPTS_PATH, response_model=AgentPromptPublic, status_code=status.HTTP_201_CREATED)

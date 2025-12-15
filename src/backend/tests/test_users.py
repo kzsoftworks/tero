@@ -2,9 +2,9 @@ from typing import Callable
 
 from .common import *
 
+from tero.teams.domain import PublicTeamRole, Role, TeamRoleStatus
 from tero.users.api import CURRENT_USER_PATH, USERS_PATH
 from tero.users.domain import UserProfile, UserListItem
-from tero.teams.domain import PublicTeamRole, Role, TeamRoleStatus
 
 
 async def test_get_user_profile(client: AsyncClient, teams:list[Team]):
