@@ -40,7 +40,8 @@ const filteredUsers = computed(() => {
 
 const roleOptions = ref<{ label: string, value: string }[]>([
     { label: t('teamOwner'), value: Role.TEAM_OWNER.toString() },
-    { label: t('teamMember'), value: Role.TEAM_MEMBER.toString() }
+    { label: t('teamMember'), value: Role.TEAM_MEMBER.toString() },
+    { label: t('teamEditor'), value: Role.TEAM_EDITOR.toString() }
 ])
 
 const handleUserChange = (user: NewUserRow, index: number) => {
@@ -119,18 +120,18 @@ defineExpose({
     <div v-for="(user, index) in props.newUsers" :key="index" class="flex gap-4 mb-4 w-full">
         <div class="flex flex-col gap-2 w-full">
             <span v-if="index === 0">{{ t('userName') }}</span>
-            <AutoComplete 
-                dropdown 
-                v-model="user.username" 
-                @change="handleUserChange(user, index)" 
-                @blur="handleUserChange(user, index)" 
-                class="w-full" 
+            <AutoComplete
+                dropdown
+                v-model="user.username"
+                @change="handleUserChange(user, index)"
+                @blur="handleUserChange(user, index)"
+                class="w-full"
                 :class="{'error': user.hasError}"
                 @keydown.enter="handleUserChange(user, index)"
                 :placeholder="t('userNamePlaceholder')"
-                :suggestions="usersSuggestions" 
-                @complete="onUserAutoCompleteSuggestionsRequest" 
-                :force-selection="false" 
+                :suggestions="usersSuggestions"
+                @complete="onUserAutoCompleteSuggestionsRequest"
+                :force-selection="false"
                 :loading="props.loadingUsers"
                 :empty-search-message="handleEmptyMessage(user.username)" />
         </div>
@@ -143,7 +144,9 @@ defineExpose({
         </div>
     </div>
 </template>
-<i18n lang="json">{
+
+<i18n lang="json">
+{
     "en": {
         "userName": "User name",
         "userNamePlaceholder": "Enter user name",
@@ -151,6 +154,7 @@ defineExpose({
         "role": "Role",
         "teamOwner": "Leader",
         "teamMember": "Member",
+        "teamEditor": "Editor",
         "invalidEmail": "Invalid email"
     },
     "es": {
@@ -160,6 +164,8 @@ defineExpose({
         "role": "Rol",
         "teamOwner": "Líder",
         "teamMember": "Miembro",
+        "teamEditor": "Editor",
         "invalidEmail": "Email inválido"
     }
-}</i18n>
+}
+</i18n>

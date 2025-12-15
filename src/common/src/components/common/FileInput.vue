@@ -39,6 +39,14 @@ const formattedFileAccept = computed(() => {
   return props.allowedExtensions.map((ext) => `.${ext}`).join(',')
 })
 
+const allowMultiple = computed(() => {
+  return props.maxFiles === -1 || props.maxFiles > 1
+})
+
+const isMaxFilesReached = computed(() => {
+  return props.maxFiles !== -1 && props.attachedFiles.length >= props.maxFiles
+})
+
 const isFileExtensionSupported = (filename: string): boolean => {
   const extension = filename.split('.').pop()?.toLowerCase() || ''
   return props.allowedExtensions.includes(extension)
@@ -154,22 +162,24 @@ defineExpose({
 </script>
 
 <template>
-  <div @dragover="handleDragEvent($event, true)" @dragleave="handleDragEvent($event, false)" @drop="handleDrop">
-    <input type="file" multiple ref="inputRef" class="hidden" :accept="formattedFileAccept" @change="handleFileChange" />
-    <div v-if="variant == 'input'" :class="[isDragging ? '!border-abstracta animation-pulse' : '', disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:bg-auxiliar-gray/15']" class="flex flex-col items-center border-2 border-dashed border-auxiliar-gray rounded-lg p-3 text-light-gray" @click="triggerFileInput">
-      <div class="w-full flex flex-col items-center">
-        <span>{{ t('dragDropBrowse', maxFiles === 1 ? maxFiles : 2) }}</span>
+  <div v-if="!isMaxFilesReached">
+    <div @dragover="handleDragEvent($event, true)" @dragleave="handleDragEvent($event, false)" @drop="handleDrop">
+      <input type="file" multiple ref="inputRef" class="hidden" :accept="formattedFileAccept" @change="handleFileChange" />
+      <div v-if="variant == 'input'" :class="[isDragging ? '!border-abstracta animation-pulse' : '', disabled ? 'cursor-not-allowed opacity-50' : 'cursor-pointer hover:bg-auxiliar-gray/15']" class="flex flex-col items-center border-2 border-dashed border-auxiliar-gray rounded-lg p-3 text-light-gray" @click="triggerFileInput">
+        <div class="w-full flex flex-col items-center">
+          <span>{{ t('dragDropBrowse', maxFiles === 1 ? maxFiles : 2) }}</span>
+        </div>
+      </div>
+      <div v-else class="w-full flex flex-col">
+        <div v-if="isDragging" class="absolute inset-0 bg-pale/90 rounded-xl flex items-center justify-center pointer-events-none">
+          <div class="font-medium">{{ t('dropFilesHere', { extensions: formattedFileNames(allowedExtensions) }) }}</div>
+        </div>
+        <slot />
       </div>
     </div>
-    <div v-else class="w-full flex flex-col">
-      <div v-if="isDragging" class="absolute inset-0 bg-pale/90 rounded-xl flex items-center justify-center pointer-events-none">
-        <div class="font-medium">{{ t('dropFilesHere', { extensions: formattedFileNames(allowedExtensions) }) }}</div>
-      </div>
-      <slot />
+    <div v-if="showLabel" class="text-sm mt-3 text-light-gray text-center">
+      {{ t('supportedFileTypes') }}: <span class="bold-span">{{ formattedFileNames(allowedExtensions) }}</span> | {{ t('maxFileSize') }}: <span class="bold-span">{{ MAX_FILE_SIZE_MB }} MB</span>
     </div>
-  </div>
-  <div v-if="showLabel" class="text-sm mt-3 text-light-gray text-center">
-        {{ t('supportedFileTypes') }}: <span class="bold-span">{{ formattedFileNames(allowedExtensions) }}</span> | {{ t('maxFileSize') }}: <span class="bold-span">{{ MAX_FILE_SIZE_MB }} MB</span>
   </div>
 </template>
 

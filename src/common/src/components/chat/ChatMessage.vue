@@ -42,7 +42,8 @@ export class ChatUiMessage {
     minutesSaved?: number,
     feedbackText?: string,
     hasPositiveFeedback?: boolean,
-    stopped?: boolean
+    stopped?: boolean,
+    statusUpdates?: StatusUpdate[]
   ) {
     this.text = text
     this.files = files
@@ -57,6 +58,8 @@ export class ChatUiMessage {
     this.feedbackText = feedbackText
     this.hasPositiveFeedback = hasPositiveFeedback
     this.stopped = stopped
+    this.statusUpdates = statusUpdates || []
+    this.isStatusComplete = (statusUpdates?.length || 0) > 0
   }
 
   public addChild(child: ChatUiMessage): void {
@@ -257,9 +260,9 @@ const handleNextMessage = () => {
     </div>
     <div v-else class="flex flex-col gap-2 max-w-full">
       <ChatStatus
-        v-if="message.statusUpdates && isLastMessage"
-        :statusUpdates="message.statusUpdates"
-        :isComplete="message.isStatusComplete"
+        v-if="message.statusUpdates"
+        :status-updates="message.statusUpdates"
+        :is-complete="message.isStatusComplete"
       />
       <div class="flex gap-4 min-w-[0]">
         <div v-html="renderedMsg" ref="messageElement" class="flex flex-col w-full leading-tight gap-2 overflow-x-auto"></div>

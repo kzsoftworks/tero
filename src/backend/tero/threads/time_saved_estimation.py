@@ -1,5 +1,5 @@
-from typing import List, cast
 import logging
+from typing import List, cast
 
 from langchain_core.messages import (
     SystemMessage,
@@ -13,14 +13,14 @@ from langchain_core.messages.utils import (
 )
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from ..agents.domain import LlmTemperature
 from ..ai_models import ai_factory
+from ..ai_models.domain import LlmTemperature, LlmModel
 from ..ai_models.repos import AiModelRepository
-from ..ai_models.domain import LlmModel
-from ..threads.repos import ThreadMessageRepository
 from ..core.env import env
+from ..threads.repos import ThreadMessageRepository
 from ..usage.domain import MessageUsage
 from .domain import Thread, ThreadMessage, ThreadMessageOrigin
+
 
 logger = logging.getLogger(__name__)
 

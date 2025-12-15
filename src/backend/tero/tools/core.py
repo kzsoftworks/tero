@@ -11,9 +11,11 @@ from langgraph.config import get_stream_writer
 from sqlmodel.ext.asyncio.session import AsyncSession
 
 from ..agents.domain import Agent, AgentToolConfig
+from ..agents.repos import AgentToolConfigFileRepository, AgentToolConfigFile
 from ..core.assets import solve_module_path
 from ..core.domain import CamelCaseModel
 from ..files.domain import File, FileMetadata
+from ..files.repos import FileRepository
 from ..threads.domain import AgentActionEvent, AgentAction
 from ..tools.oauth import ToolAuthCallback, ToolOAuthState
 from ..usage.domain import ToolUsage
@@ -41,6 +43,7 @@ def _fix_core_schema_references(ret: dict) -> dict:
         elif isinstance(value, dict):
             ret[key] = _fix_core_schema_references(value)
     return ret
+
 
 class StatusUpdateCallbackHandler(AsyncCallbackHandler):
     def __init__(self, tool_id: str, description: Optional[str] = "", 
@@ -83,6 +86,7 @@ class StatusUpdateCallbackHandler(AsyncCallbackHandler):
             )
         )
 
+
 class AgentTool(CamelCaseModel, abc.ABC):
     id: str
     name: str
@@ -93,7 +97,7 @@ class AgentTool(CamelCaseModel, abc.ABC):
     _config: Optional[dict] = None
     _db: Optional[AsyncSession] = None
     _thread_id: Optional[int] = None
-    
+
     # this method is invoked every time the agent tool is configured or used for a given agent and user id
     def configure(self, agent: Agent, user_id: int, config: dict, db: AsyncSession, thread_id: Optional[int] = None):
         self._agent = agent
@@ -101,22 +105,22 @@ class AgentTool(CamelCaseModel, abc.ABC):
         self._config = config
         self._db = db
         self._thread_id = thread_id
-    
+
     @property
     def agent(self) -> Agent:
         return cast(Agent, self._agent)
-    
-    @property
-    def db(self) -> AsyncSession:
-        return cast(AsyncSession, self._db)
-    
+
     @property
     def user_id(self) -> int:
         return cast(int, self._user_id)
-    
+
     @property
     def config(self) -> dict:
         return cast(dict, self._config)
+
+    @property
+    def db(self) -> AsyncSession:
+        return cast(AsyncSession, self._db)
 
     # this method is invoked when the tool is configured or the configuration changes
     async def setup(self, prev_config: Optional[AgentToolConfig]) -> dict:
@@ -153,6 +157,9 @@ class AgentTool(CamelCaseModel, abc.ABC):
     def _is_file_property(value: Any) -> bool:
         if not isinstance(value, dict):
             return False
+        ref = value.get("$ref")
+        if ref and ref.endswith("/File"):
+            return True
         items = value.get("items")
         if not isinstance(items, dict):
             return False
@@ -212,6 +219,31 @@ class AgentToolWithFiles(AgentTool, abc.ABC):
     @abc.abstractmethod
     async def remove_file(self, file: File):
         pass
+
+    async def _clone_files(
+        self,
+        agent_id: int,
+        cloned_agent_id: int,
+        tool_id: str,
+        user_id: int,
+        db: AsyncSession,
+    ) -> dict:
+        tool_file_repo = AgentToolConfigFileRepository(db)
+        files = await tool_file_repo.find_with_content_by_agent_and_tool(
+            agent_id, tool_id
+        )
+        file_id_map = {}
+
+        for file in files:
+            new_file = file.clone(user_id=user_id)
+            new_file = await FileRepository(db).add(new_file)
+            await tool_file_repo.add(
+                AgentToolConfigFile(
+                    agent_id=cloned_agent_id, tool_id=tool_id, file_id=new_file.id
+                )
+            )
+            file_id_map[file.id] = new_file.id
+        return file_id_map
 
 
 class AgentToolMetadata(CamelCaseModel):

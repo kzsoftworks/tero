@@ -71,13 +71,12 @@ class JiraTool(AgentTool):
     
     async def _save_client_info(self, config: dict):
         repo = ToolOAuthClientInfoRepository(self.db)
-        client_info = await repo.find_by_ids(self.user_id, self.agent.id, self.id)
+        client_info = await repo.find_by_ids(self.agent.id, self.id)
         client_id = config["clientId"]
         client_secret = config["clientSecret"]
         scope = " ".join(config["scope"])
         if not client_info:
             client_info = ToolOAuthClientInfo(
-                user_id=self.user_id,
                 agent_id=self.agent.id,
                 tool_id=self.id,
                 client_id=client_id,
@@ -104,7 +103,7 @@ class JiraTool(AgentTool):
             authorization_endpoint=AnyHttpUrl(f"{base_url}/authorize"),
             token_endpoint=AnyHttpUrl(f"{base_url}/oauth/token")
         )
-        client_info = await ToolOAuthClientInfoRepository(self.db).find_by_ids(self.user_id, self.agent.id, self.id)
+        client_info = await ToolOAuthClientInfoRepository(self.db).find_by_ids(self.agent.id, self.id)
         # add offline_access scope to be able to refresh tokens
         return AgentToolOauth(base_url, oauth_metadata, cast(str, cast(ToolOAuthClientInfo, client_info).scope) + " offline_access", self.agent.id, self.id, self.user_id, self.db)
 
@@ -136,7 +135,7 @@ class JiraTool(AgentTool):
 
     async def teardown(self):
         await ToolOAuthRepository(self.db).delete_token(self.user_id, self.agent.id, self.id)
-        await ToolOAuthClientInfoRepository(self.db).delete(self.user_id, self.agent.id, self.id)
+        await ToolOAuthClientInfoRepository(self.db).delete(self.agent.id, self.id)
         await JiraToolConfigRepository(self.db).delete(self.agent.id)
 
     async def build_langchain_tools(self) -> list[BaseTool]:

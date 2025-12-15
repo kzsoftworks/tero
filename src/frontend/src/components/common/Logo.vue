@@ -1,10 +1,13 @@
 <script setup lang="ts">
 import logo from '@/assets/images/logo.webp'
 
-const { width = 'auto', height = '56px' } = defineProps<{
+withDefaults(defineProps<{
     width?: string,
     height?: string
-}>();
+}>(), {
+    width: 'auto',
+    height: '56px'
+});
 </script>
 
 <template>

@@ -7,30 +7,29 @@ from uuid import UUID
 from enum import Enum
 import tiktoken
 
-from langchain.indexes import SQLRecordManager, aindex
+from langchain_classic.indexes import SQLRecordManager, aindex
+from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_core.callbacks.manager import AsyncCallbackManagerForRetrieverRun, AsyncCallbackManager
 from langchain_core.documents import Document
-from langchain_core.outputs import LLMResult
 from langchain_core.language_models.chat_models import BaseChatModel
 from langchain_core.messages import HumanMessage, AIMessage
+from langchain_core.outputs import LLMResult
 from langchain_core.output_parsers import StrOutputParser
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.runnables import RunnablePassthrough
 from langchain_core.runnables.config import ensure_config
 from langchain_core.tools import BaseTool, StructuredTool
 from langchain_core.vectorstores import VectorStoreRetriever
-from langchain_core.callbacks import AsyncCallbackHandler
 from langchain_postgres import PGVector
 from langchain_text_splitters import MarkdownTextSplitter, CharacterTextSplitter
 from langgraph.config import get_stream_writer
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncEngine
 from sqlmodel.ext.asyncio.session import AsyncSession
 
-from ...agents.domain import AgentToolConfig, AgentToolConfigFile
-from ...agents.repos import AgentToolConfigFileRepository
-from ...ai_models import ai_factory, azure_provider
+from ...agents.domain import AgentToolConfig
+from ...ai_models import ai_factory
 from ...ai_models.domain import LlmModel
 from ...ai_models.repos import AiModelRepository
 from ...core.assets import solve_asset_path
@@ -38,14 +37,15 @@ from ...core.env import env
 from ...files.domain import File, FileProcessor
 from ...files.file_quota import FileQuota, CurrentQuota
 from ...files.parser import extract_file_text
+from ...files.repos import FileRepository
+from ...threads.domain import AgentActionEvent, AgentAction
 from ...usage.domain import Usage, MessageUsage, UsageType
 from ...usage.repos import UsageRepository
 from ...users.domain import User
-from ...files.repos import FileRepository
-from ...threads.domain import AgentActionEvent, AgentAction
 from ..core import AgentToolWithFiles, load_schema
 from .domain import DocToolFile, DocToolConfig
 from .repos import DocToolFileRepository, DocToolConfigRepository
+
 
 logger = logging.getLogger(__name__)
 DOCS_TOOL_ID = "docs"
@@ -346,7 +346,6 @@ class DocsTool(AgentToolWithFiles):
             coroutine=lambda user_query: docs_tool._run(user_query),
         )]
 
-
     async def clone(
         self,
         agent_id: int,
@@ -362,31 +361,6 @@ class DocsTool(AgentToolWithFiles):
         await self._clone_record_manager(agent_id, cloned_agent_id, db, file_id_map)
         await self._clone_tool_config(agent_id, cloned_agent_id, db)
         await self._clone_tool_files(agent_id, cloned_agent_id, file_id_map, db)
-
-    async def _clone_files(
-        self,
-        agent_id: int,
-        cloned_agent_id: int,
-        tool_id: str,
-        user_id: int,
-        db: AsyncSession,
-    ) -> dict:
-        tool_file_repo = AgentToolConfigFileRepository(db)
-        files = await tool_file_repo.find_with_content_by_agent_and_tool(
-            agent_id, tool_id
-        )
-        file_id_map = {}
-
-        for file in files:
-            new_file = file.clone(user_id=user_id)
-            new_file = await FileRepository(db).add(new_file)
-            await tool_file_repo.add(
-                AgentToolConfigFile(
-                    agent_id=cloned_agent_id, tool_id=tool_id, file_id=new_file.id
-                )
-            )
-            file_id_map[file.id] = new_file.id
-        return file_id_map
 
     async def _clone_vector_store(
         self, agent_id: int, cloned_agent_id: int, db: AsyncSession

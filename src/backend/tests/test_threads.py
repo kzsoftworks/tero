@@ -1,18 +1,17 @@
 from datetime import timezone
+import re
 import threading
 import time
 from typing import Any, Callable
-import re
 
-from sse_starlette import ServerSentEvent
 from sqlalchemy import select
+from sse_starlette import ServerSentEvent
 
 from .common import *
 
-from tero.files.domain import FileMetadata, FileProcessor
+from tero.files.domain import FileMetadata, FileProcessor, FileMetadataWithContent
 from tero.threads.api import THREADS_PATH, THREAD_PATH, THREAD_MESSAGES_PATH, THREAD_MESSAGE_PATH, THREAD_FILE_PATH
 from tero.threads.domain import ThreadListItem, ThreadMessageOrigin, ThreadMessagePublic
-from tero.files.domain import FileMetadataWithContent
 from tero.tools.core import AgentActionEvent, AgentAction
 from tero.usage.domain import Usage, UsageType
 
@@ -299,11 +298,12 @@ def _build_thread_messages_response(thread_id: int, message_id: int, parent_mess
             origin=ThreadMessageOrigin.USER,
             timestamp=timestamp,
             parent_id=parent_message_id,
+            status_updates=None,
             children=[ThreadMessagePublic(id=message_id + 1, text=response_text, thread_id=thread_id,
                     origin=ThreadMessageOrigin.AGENT,
                     has_positive_feedback=has_positive_feedback,
                     timestamp=timestamp,
-                    parent_id=message_id, minutes_saved=minutes_saved, feedback_text=feedback_text)
+                    parent_id=message_id, minutes_saved=minutes_saved, feedback_text=feedback_text, status_updates=[AgentActionEvent(action=AgentAction.PRE_MODEL_HOOK)])
             ])
     ]
 

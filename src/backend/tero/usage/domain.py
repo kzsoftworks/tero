@@ -14,6 +14,7 @@ from ..teams.domain import Team
 
 PRIVATE_AGENT_ID = -1
 
+
 class UsageType(Enum):
     PROMPT_TOKENS = "PROMPT_TOKENS"
     COMPLETION_TOKENS = "COMPLETION_TOKENS"

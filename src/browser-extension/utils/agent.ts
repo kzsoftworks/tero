@@ -8,23 +8,21 @@ import { AgentPrompt } from "../../common/src/utils/domain"
 
 export abstract class AgentSource {
   abstract findAgents(authService?: AuthService): Promise<Agent[]>;
-  
+
   static async loadAgentsFromUrl(url: string): Promise<Agent[]> {
     const agents: Agent[] = []
-    const manifest = await Agent.findManifest(url)    
-    console.log("Manifest: ", manifest)
-    
+    const manifest = await Agent.findManifest(url)
+
     // comparing with agents-hub for backwards compatibility with environments that haven't fully migrated to tero 
     if (manifest.auth && (manifest.auth.clientId === AgentType.TeroAgent || manifest.auth.clientId === "agents-hub")) {
       const authService = new AuthService(manifest.auth!)
-      await authService.login()
+      await authService.ensureAuthenticated()
       const tero = new TeroServer(url, manifest)
       agents.push(...await tero.findAgents(authService))
-      console.log("loaded agents", agents)
     } else {
       agents.push(new StandaloneAgent(url, manifest))
     }
-    
+
     if (agents.length > 0) {
       for (const agent of agents) {
         if (await findAgentById(agent.manifest.id)) {
@@ -34,7 +32,7 @@ export abstract class AgentSource {
         await addAgent(agent);
       }
     }
-    
+
     return agents
   }
 }
@@ -85,13 +83,13 @@ export abstract class Agent {
   protected async *processStreamResponse(stream: AsyncIterable<any>): AsyncIterable<MessagePart> {
     for await (const part of stream) {
       if (typeof part === "string") {
-        yield {message: part};
+        yield { message: part };
       } else if (part && part instanceof ServerSentEvent) {
         const event = part.event || 'message'
         if (event === 'message') {
-          yield {message: part.data};
+          yield { message: part.data };
         } else if (event === 'messageId') {
-          yield {messageId: parseInt(part.data)};
+          yield { messageId: parseInt(part.data) };
         } else {
           yield { [`${part.event}`]: JSON.parse(part.data) };
         }
@@ -121,7 +119,7 @@ export abstract class Agent {
   }
 
   public static fromJsonObject(obj: any): Agent {
-    return obj.type === AgentType.TeroAgent? TeroAgent.fromJsonObject(obj) : StandaloneAgent.fromJsonObject(obj);
+    return obj.type === AgentType.TeroAgent ? TeroAgent.fromJsonObject(obj) : StandaloneAgent.fromJsonObject(obj);
   }
 
   public toJSON(): any {
@@ -437,7 +435,7 @@ export class TeroAgent extends Agent {
 }
 
 export class TeroServer implements AgentSource {
-  constructor(private readonly serverUrl: string, private readonly manifest: AgentManifest) {}
+  constructor(private readonly serverUrl: string, private readonly manifest: AgentManifest) { }
 
   async findAgents(authService?: AuthService): Promise<Agent[]> {
     const ret = await fetchJson(
@@ -445,7 +443,7 @@ export class TeroServer implements AgentSource {
       await Agent.buildHttpRequest("GET", undefined, authService)
     );
     return Promise.all(ret.map((a: any) => TeroAgent.fromTero(a, this.manifest, this.serverUrl)));
-  }  
+  }
 }
 
 export enum AgentType {
@@ -454,16 +452,16 @@ export enum AgentType {
 }
 
 export interface AgentManifest {
-    id: string
-    name?: string
-    capabilities?: string[]
-    welcomeMessage?: string
-    prompts?: ManifestPrompt[]
-    onSessionClose?: EndAction
-    onHttpRequest?: AgentRule[]
-    pollInteractionPeriodSeconds?: number
-    auth?: AuthConfig
-    contactEmail: string
+  id: string
+  name?: string
+  capabilities?: string[]
+  welcomeMessage?: string
+  prompts?: ManifestPrompt[]
+  onSessionClose?: EndAction
+  onHttpRequest?: AgentRule[]
+  pollInteractionPeriodSeconds?: number
+  auth?: AuthConfig
+  contactEmail: string
 }
 
 export interface ManifestPrompt {
@@ -473,60 +471,60 @@ export interface ManifestPrompt {
 }
 
 export interface AgentRule {
-    condition: AgentRuleCondition
-    actions: AgentRuleAction[]
+  condition: AgentRuleCondition
+  actions: AgentRuleAction[]
 }
 
 export interface AgentRuleCondition {
-    urlRegex: string
-    requestMethods?: string[]
-    resourceTypes?: string[]
-    event?: string
+  urlRegex: string
+  requestMethods?: string[]
+  resourceTypes?: string[]
+  event?: string
 }
 
 export interface AgentRuleAction {
-    activate?: ActivationAction
-    addHeader?: AddHeaderRuleAction
-    recordInteraction?: RecordInteractionRuleAction
+  activate?: ActivationAction
+  addHeader?: AddHeaderRuleAction
+  recordInteraction?: RecordInteractionRuleAction
 }
 
 export interface ActivationAction {
-    httpRequest?: HttpRequestAction
+  httpRequest?: HttpRequestAction
 }
 
 export interface EndAction {
-    httpRequest: HttpRequestAction
+  httpRequest: HttpRequestAction
 }
 
 export interface HttpRequestAction {
-    url: string
-    method?: string
+  url: string
+  method?: string
 }
 
 export interface AddHeaderRuleAction {
-    header: string
-    value: string
+  header: string
+  value: string
 }
 
 export interface RecordInteractionRuleAction {
-    httpRequest?: HttpRequestAction
+  httpRequest?: HttpRequestAction
 }
 
 export interface AgentSession {
-    id: string
+  id: string
 }
 
 export class RequestEvent {
-    event: RequestEventType;
-    details: Browser.webRequest.OnCompletedDetails | Browser.webRequest.OnBeforeRequestDetails;
+  event: RequestEventType;
+  details: Browser.webRequest.OnCompletedDetails | Browser.webRequest.OnBeforeRequestDetails;
 
-    constructor(event: RequestEventType, details: Browser.webRequest.OnCompletedDetails | Browser.webRequest.OnBeforeRequestDetails) {
-        this.event = event;
-        this.details = details;
-    }
+  constructor(event: RequestEventType, details: Browser.webRequest.OnCompletedDetails | Browser.webRequest.OnBeforeRequestDetails) {
+    this.event = event;
+    this.details = details;
+  }
 }
 
 export enum RequestEventType {
-    OnBeforeRequest = "onBeforeRequest",
-    OnCompleted = "onCompleted",
+  OnBeforeRequest = "onBeforeRequest",
+  OnCompleted = "onCompleted",
 }

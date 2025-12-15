@@ -24,7 +24,9 @@ const onSave = () => {
     <div class="flex flex-col gap-2 my-1 modal-form *:flex *:flex-col">
       <slot/>
     </div>
-    <button class="bg-violet-600 text-white rounded-md w-full h-8 hover:text-white hover:bg-violet-800 block" @click="onSave">{{ buttonText }}</button>
+    <SimpleButton @click="onSave" shape="square" size="small" class="w-full" variant="primary" >
+      <span>{{ buttonText }}</span>
+    </SimpleButton>
   </Modal>
 </template>
 

@@ -473,7 +473,7 @@ defineExpose({
     </div>
     <Dialog :visible="promptVariables.length > 0"
       :header="t('promptVariablesTitle')" :modal="true"
-      :draggable="false" :resizable="false" :closable="true" class="w-90"
+      :draggable="false" :resizable="false" :closable="true" class="w-full max-w-[600px] m-4"
       @update:visible="closePromptVariablesEditor">
         <Form class="flex flex-col gap-5" @submit="submitPromptVariables">
           <div class="flex flex-col gap-3">

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, status, UploadFile, Backg
 from fastapi.responses import StreamingResponse
 from sqlmodel.ext.asyncio.session import AsyncSession
 
+from ..core import repos as repos_module
 from ..core.api import BASE_PATH
 from ..core.auth import get_current_user
 from ..core.domain import CamelCaseModel
@@ -17,26 +18,24 @@ from ..files.domain import File, FileStatus, FileUpdate, FileMetadata, FileMetad
 from ..files.file_quota import QuotaExceededError
 from ..files.parser import add_encoding_to_content_type
 from ..files.repos import FileRepository
-from ..threads.domain import Thread, ThreadMessage
-from ..threads.repos import ThreadRepository, ThreadMessageRepository
+from ..teams.domain import GLOBAL_TEAM_ID, Role
 from ..tools.core import AgentTool
 from ..tools.oauth import ToolOAuthRequest, build_tool_oauth_request_http_exception
 from ..tools.repos import ToolRepository
-from ..tools.docs.domain import DocToolFile
-from ..tools.docs.repos import DocToolFileRepository
 from ..users.domain import User
+from ..users.repos import UserRepository
 from . import field_generation, distribution
 from .domain import AgentListItem, Agent, AgentUpdate, AgentToolConfig, AutomaticAgentField, PublicAgent
+from .evaluators.repos import EvaluatorRepository
 from .prompts.repos import AgentPromptRepository
 from .repos import AgentRepository, AgentToolConfigRepository, AgentToolConfigFileRepository
+from .test_cases.clone import clone_test_case
 from .test_cases.repos import TestCaseRepository
-from .test_cases.domain import TestCase
 from .tool_file import upload_tool_file
 
 
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
 AGENTS_PATH = f"{BASE_PATH}/agents"
 _DEFAULT_FILE_NAME = "uploaded-file"
 DEFAULT_SYSTEM_PROMPT = """You are a helpful AI assistant.
@@ -44,6 +43,7 @@ Use provided tools and information provided in context to answer user questions.
 Avoid generating responses that are not based on tools or previous context.
 Answer in the same language as the user.
 Use markdown to format your responses. You can include code blocks, tables, plantuml diagrams code blocks, echarts configuration code blocks and any standard markdown format"""
+
 
 class AgentSort(Enum):
     LAST_UPDATE = "LAST_UPDATE"
@@ -72,7 +72,7 @@ async def find_agents(
 
 
 @router.get(f"{AGENTS_PATH}/default")
-async def find_default_agent(user: Annotated[User, Depends(get_current_user)], 
+async def find_default_agent(user: Annotated[User, Depends(get_current_user)],
     db: Annotated[AsyncSession, Depends(get_db)]
 ) -> PublicAgent:
     agent = await AgentRepository(db).find_default_agent()
@@ -120,6 +120,13 @@ async def new_agent(user: Annotated[User, Depends(get_current_user)],
 async def update_agent(agent_id: int, updated: AgentUpdate, user: Annotated[User, Depends(get_current_user)],
         db: Annotated[AsyncSession, Depends(get_db)]) -> PublicAgent:
     agent = await find_editable_agent(agent_id, user, db)
+
+    if updated.team_id == GLOBAL_TEAM_ID and env.disable_publish_global and not any(tr.role in [Role.TEAM_OWNER, Role.TEAM_EDITOR] and tr.team_id == GLOBAL_TEAM_ID for tr in user.team_roles):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Global team members cannot publish to global team"
+        )
+
     agent.update_with(updated)
     ret = await AgentRepository(db).update(agent)
     if updated.publish_prompts:
@@ -176,7 +183,7 @@ async def configure_agent_tool(agent_id: int, tool_config: PublicAgentTool,
     except Exception:
         logger.error(f"Invalid tool configuration {agent_id} {tool_config.tool_id} {tool_config.config}", exc_info=True)
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid tool configuration")
-    
+
 
 def _find_agent_tool(tool_id: str) -> Optional[AgentTool]:
     return ToolRepository().find_by_id(tool_id)
@@ -231,7 +238,7 @@ AGENT_TOOL_FILES_PATH = f"{AGENT_TOOL_PATH}/files"
 
 @router.post(AGENT_TOOL_FILES_PATH, status_code=status.HTTP_202_ACCEPTED)
 async def upload_agent_tool_file(agent_id: int, tool_id: str, file: UploadFile,
-        user: Annotated[User, Depends(get_current_user)], db: Annotated[AsyncSession, Depends(get_db)], 
+        user: Annotated[User, Depends(get_current_user)], db: Annotated[AsyncSession, Depends(get_db)],
         background_tasks: BackgroundTasks) -> FileMetadata:
         tool = await _find_editable_configured_agent_tool(agent_id, tool_id, user, db)
         f = File(
@@ -262,42 +269,21 @@ async def download_agent_tool_file(agent_id: int, tool_id: str, file_id: int,
     ret = await AgentToolConfigFileRepository(db).find_with_content_by_ids(agent_id, tool_id, file_id)
     return build_file_download_response(ret)
 
-class PublicDocToolFile(FileMetadataWithContent, CamelCaseModel):
-    description: str
-        
-    @staticmethod
-    def build(file_metadata: FileMetadataWithContent, doc_tool_file: DocToolFile) -> 'PublicDocToolFile':
-        return PublicDocToolFile(
-            id=file_metadata.id,
-            name=file_metadata.name,
-            content_type=file_metadata.content_type,
-            user_id=file_metadata.user_id,
-            timestamp=file_metadata.timestamp,
-            status=file_metadata.status,
-            description=doc_tool_file.description,
-            processed_content=file_metadata.processed_content,
-            file_processor=file_metadata.file_processor
-        )
-
 
 @router.get(AGENT_TOOL_FILE_PATH)
 async def find_agent_doc_tool_file(agent_id: int, tool_id: str, file_id: int,
         user: Annotated[User, Depends(get_current_user)],
-        db: Annotated[AsyncSession, Depends(get_db)]) -> PublicDocToolFile:
+        db: Annotated[AsyncSession, Depends(get_db)]) -> FileMetadataWithContent:
     await _find_configured_agent_tool(agent_id, tool_id, user, db)
     file_obj = await AgentToolConfigFileRepository(db).find_by_ids(agent_id, tool_id, file_id)
     if not file_obj:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
-    file_metadata = FileMetadataWithContent.from_file(file_obj)
-    doc_tool_file = await DocToolFileRepository(db).find_by_agent_id_and_file_id(agent_id, file_id)
-    if not doc_tool_file:
-        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Doc tool file not found")
-    return PublicDocToolFile.build(file_metadata, doc_tool_file)
+    return FileMetadataWithContent.from_file(file_obj)
 
 
 @router.put(AGENT_TOOL_FILE_PATH, status_code=status.HTTP_202_ACCEPTED)
 async def update_agent_tool_file(agent_id: int, tool_id: str, file_id: int, file: UploadFile,
-        user: Annotated[User, Depends(get_current_user)], db: Annotated[AsyncSession, Depends(get_db)], 
+        user: Annotated[User, Depends(get_current_user)], db: Annotated[AsyncSession, Depends(get_db)],
         background_tasks: BackgroundTasks) -> FileMetadata:
     tool = await _find_editable_configured_agent_tool(agent_id, tool_id, user, db)
     f = await _find_agent_tool_file(agent_id, tool_id, file_id, db)
@@ -311,7 +297,9 @@ async def update_agent_tool_file(agent_id: int, tool_id: str, file_id: int, file
     )
     f.update_with(update)
     await FileRepository(db).update(f)
-    background_tasks.add_task(_update_tool_file, f, tool, user, db)
+    # Pass IDs instead of objects to avoid session conflicts
+    # The background task will create its own session and re-fetch the entities
+    background_tasks.add_task(_update_tool_file, f.id, tool.id, agent_id, user.id, tool.config)
     return FileMetadata.from_file(f)
 
 
@@ -322,21 +310,28 @@ async def _find_agent_tool_file(agent_id: int, tool_id: str, file_id: int, db: A
     return ret
 
 
-async def _update_tool_file(file: File, tool: AgentTool, user: User, db: AsyncSession):
-    try:
-        await tool.update_file(file, user)
-        file.status = FileStatus.PROCESSED
-    except QuotaExceededError:
-        file.status = FileStatus.QUOTA_EXCEEDED
-        logger.error(f"Quota exceeded for user {file.user_id} when updating tool file {file.id} {file.name}")
-    except Exception as e:
-        file.status = FileStatus.ERROR
-        logger.error(f"Error updating tool file {file.id} {file.name} {e}", exc_info=True)
-    finally:
-        await FileRepository(db).update(file)
+async def _update_tool_file(file_id: int, tool_id: str, agent_id: int, user_id: int, tool_config: dict):
+    async with AsyncSession(repos_module.engine, expire_on_commit=False) as db:
+        file = cast(File, await FileRepository(db).find_by_id(file_id))
+        user = cast(User, await UserRepository(db).find_by_id(user_id))
+        agent = cast(Agent, await AgentRepository(db).find_by_id(agent_id))
+        tool = cast(AgentTool, ToolRepository().find_by_id(tool_id))
+        tool.configure(agent, user_id, tool_config, db)
+
+        try:
+            await tool.update_file(file, user)
+            file.status = FileStatus.PROCESSED
+        except QuotaExceededError:
+            file.status = FileStatus.QUOTA_EXCEEDED
+            logger.warning(f"Quota exceeded for user {user_id} when updating tool file {file_id} {file.name}")
+        except Exception as e:
+            file.status = FileStatus.ERROR
+            logger.error(f"Error updating tool file {file_id} {file.name} {e}", exc_info=True)
+        finally:
+            await FileRepository(db).update(file)
 
 
-@router.delete(AGENT_TOOL_FILE_PATH, status_code=status.HTTP_204_NO_CONTENT)    
+@router.delete(AGENT_TOOL_FILE_PATH, status_code=status.HTTP_204_NO_CONTENT)
 async def delete_agent_tool_file(agent_id: int, tool_id: str, file_id: int,
         user: Annotated[User, Depends(get_current_user)], db: Annotated[AsyncSession, Depends(get_db)]):
     tool = await _find_editable_configured_agent_tool(agent_id, tool_id, user, db)
@@ -355,12 +350,13 @@ async def clone_agent(agent_id: int, user: Annotated[User, Depends(get_current_u
     await _clone_agent_prompts(agent_id, cloned_agent.id, user.id, db)
     await _clone_agent_tools(agent_id, cloned_agent.id, user.id, db)
     await _clone_agent_test_cases(agent_id, cloned_agent.id, user.id, db)
+    await _clone_agent_evaluator(agent, cloned_agent, db)
 
     return PublicAgent.from_agent(cloned_agent, True)
 
 
 async def _clone_agent_prompts(agent_id: int, cloned_agent_id: int, user_id: int, db: AsyncSession) -> None:
-    prompt_repo = AgentPromptRepository(db) 
+    prompt_repo = AgentPromptRepository(db)
     prompts = await prompt_repo.find_user_agent_prompts(user_id, agent_id)
 
     if prompts:
@@ -389,40 +385,23 @@ async def _clone_agent_tools(agent_id: int, cloned_agent_id: int, user_id: int, 
 async def _clone_agent_test_cases(agent_id: int, cloned_agent_id: int, user_id: int, db: AsyncSession) -> None:
     test_case_repo = TestCaseRepository(db)
     test_cases = await test_case_repo.find_by_agent(agent_id)
-    
+
     if not test_cases:
         return
-    
-    thread_repo = ThreadRepository(db)
-    thread_message_repo = ThreadMessageRepository(db)
-    
+
     for test_case in test_cases:
-        cloned_thread = await thread_repo.add(
-            Thread(
-                agent_id=cloned_agent_id,
-                user_id=user_id,
-                is_test_case=True,
-                name=test_case.thread.name
-            )
-        )
-        
-        await test_case_repo.save(
-            TestCase(
-                thread_id=cloned_thread.id,
-                agent_id=cloned_agent_id
-            )
-        )
-        
-        original_messages = await thread_message_repo.find_by_thread_id(test_case.thread_id)
-        for message in original_messages:
-            await thread_message_repo.add(
-                ThreadMessage(
-                    thread_id=cloned_thread.id,
-                    origin=message.origin,
-                    text=message.text,
-                    timestamp=message.timestamp
-                )
-            )
+        await clone_test_case(test_case, cloned_agent_id, user_id, db)
+
+
+async def _clone_agent_evaluator(agent: Agent, cloned_agent: Agent, db: AsyncSession) -> None:
+    evaluator_repo = EvaluatorRepository(db)
+    evaluator = await evaluator_repo.find_by_id(agent.evaluator_id) if agent.evaluator_id else None
+    if not evaluator:
+        return
+
+    cloned_evaluator = await evaluator_repo.save(evaluator.clone())
+    cloned_agent.evaluator_id = cloned_evaluator.id
+    await AgentRepository(db).update(cloned_agent)
 
 
 @router.get(f"{AGENT_PATH}/dist")

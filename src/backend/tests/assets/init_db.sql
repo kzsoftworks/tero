@@ -67,7 +67,8 @@ insert into thread (name, user_id, agent_id, creation, deleted, is_test_case) va
 ('Test Case #3', 2, 2, '2025-02-21 12:12', False, True),
 ('Test Case Execution #1', 1, 1, '2025-02-21 12:15', False, True),
 ('Test Case Execution #2', 1, 1, '2025-02-21 12:16', False, True),
-('Test Case Execution #3', 2, 2, '2025-02-21 12:17', False, True);
+('Test Case Execution #3', 2, 2, '2025-02-21 12:17', False, True),
+('Test Case #4', 1, 1, '2025-02-21 12:13', False, True);
 
 insert into thread_message (thread_id, origin, text, timestamp, minutes_saved, stopped) values
 (1, 'USER', 'This is a message', '2025-02-21 12:00', 5, False),
@@ -91,21 +92,26 @@ insert into thread_message (thread_id, origin, text, timestamp, minutes_saved, s
 (11, 'USER', 'Which is the capital of Uruguay? Output just the name', '2025-02-21 12:16', Null, False),
 (11, 'AGENT', 'Montevideo', '2025-02-21 12:17', Null, False),
 (12, 'USER', 'Test case message 3', '2025-02-21 12:17', Null, False),
-(12, 'AGENT', 'Test case execution response 3', '2025-02-21 12:18', Null, False);
+(12, 'AGENT', 'Test case execution response 3', '2025-02-21 12:18', Null, False),
+(13, 'USER', 'What is 2 + 2? Only provide the number', '2025-02-21 12:13', Null, False),
+(13, 'AGENT', '4', '2025-02-21 12:14', Null, False),
+(13, 'USER', 'What is 3 + 3? Only provide the number', '2025-02-21 12:14', Null, False),
+(13, 'AGENT', '6', '2025-02-21 12:15', Null, False);
 
 insert into test_case (thread_id, agent_id, last_update) values
 (7, 1, '2025-02-21 12:10'),
 (8, 1, '2025-02-21 12:11'),
-(9, 2, '2025-02-21 12:12');
+(9, 2, '2025-02-21 12:12'),
+(13, 1, '2025-02-21 12:15');
 
 insert into test_suite_run (agent_id, status, executed_at, completed_at, total_tests, passed_tests, failed_tests, error_tests, skipped_tests) values
 (1, 'SUCCESS', '2025-02-21 12:15', '2025-02-21 12:17', 2, 2, 0, 0, 0),
 (2, 'FAILURE', '2025-02-21 12:17', '2025-02-21 12:18', 1, 0, 0, 1, 0);
 
-insert into test_case_result (thread_id, test_case_id, test_suite_run_id, status, executed_at) values
-(10, 7, 1, 'SUCCESS', '2025-02-21 12:15'),
-(11, 8, 1, 'SUCCESS', '2025-02-21 12:16'),
-(12, 9, 2, 'ERROR', '2025-02-21 12:17');
+insert into test_case_result (thread_id, test_case_id, test_suite_run_id, status, executed_at, test_case_name) values
+(10, 7, 1, 'SUCCESS', '2025-02-21 12:15', 'Test Case #1'),
+(11, 8, 1, 'SUCCESS', '2025-02-21 12:16', 'Test Case #2'),
+(12, 9, 2, 'ERROR', '2025-02-21 12:17', 'Test Case #3');
 
 insert into usage (message_id, user_id, agent_id, model_id, timestamp, quantity, usd_cost, type) values
 (2, 1, 1, 'gpt-4o-mini', '2025-02-21 12:00', 100, 0.5, 'PROMPT_TOKENS'),
@@ -141,3 +147,40 @@ insert into external_agent_time_saving (external_agent_id, user_id, date, minute
 (1, 1, '2025-02-21 12:00', 60),
 (2, 1, '2025-02-21 12:01', 120),
 (3, 1, '2025-01-20 12:02', 60);
+
+-- Triggers for test suite run events LISTEN/NOTIFY (from migration 20251124-c759e1cf2817)
+CREATE OR REPLACE FUNCTION notify_test_suite_run_event() RETURNS TRIGGER AS $$
+BEGIN
+    PERFORM pg_notify(
+        'test_suite_events',
+        json_build_object(
+            'suite_run_id', NEW.test_suite_run_id,
+            'event_id', NEW.id
+        )::text
+    );
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER after_insert_test_suite_run_event
+AFTER INSERT ON test_suite_run_event
+FOR EACH ROW EXECUTE FUNCTION notify_test_suite_run_event();
+
+CREATE OR REPLACE FUNCTION notify_test_suite_run_status() RETURNS TRIGGER AS $$
+BEGIN
+    PERFORM pg_notify(
+        'test_suite_status',
+        json_build_object(
+            'suite_run_id', NEW.id,
+            'status', NEW.status
+        )::text
+    );
+    RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+CREATE TRIGGER after_update_test_suite_run_status
+AFTER UPDATE OF status ON test_suite_run
+FOR EACH ROW 
+WHEN (OLD.status IS DISTINCT FROM NEW.status)
+EXECUTE FUNCTION notify_test_suite_run_status();

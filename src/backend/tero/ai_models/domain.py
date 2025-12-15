@@ -43,6 +43,21 @@ class LlmModel(CamelCaseModel, table=True):
         return self.id in env.agent_basic_models
 
 
+class LlmTemperature(Enum):
+    CREATIVE = 'CREATIVE'
+    NEUTRAL = 'NEUTRAL'
+    PRECISE = 'PRECISE'
+
+    def get_float(self):
+        return env.temperatures[self.value]
+
+
+class ReasoningEffort(Enum):
+    LOW = 'LOW'
+    MEDIUM = 'MEDIUM'
+    HIGH = 'HIGH'
+
+
 class AiModelProvider(ABC):
 
     def build_chat_model(self, model: str, temperature: Optional[float]=None, reasoning_effort: Optional[str] = None) -> BaseChatModel:

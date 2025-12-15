@@ -44,7 +44,7 @@ class McpTool(AgentTool):
 
     async def teardown(self):
         await ToolOAuthRepository(self.db).delete_token(self.user_id, self.agent.id, self.id)
-        await ToolOAuthClientInfoRepository(self.db).delete(self.user_id, self.agent.id, self.id)
+        await ToolOAuthClientInfoRepository(self.db).delete(self.agent.id, self.id)
 
     @asynccontextmanager
     async def load(self) -> AsyncIterator['McpTool']:

@@ -3,9 +3,11 @@ from .common import *
 from tero.threads.api import THREADS_PATH, AUDIO_FORMAT
 from tero.threads.domain import ThreadTranscriptionResult
 
+
 THREAD_ID = 21
 TRANSCRIPT_PATH = f"{THREADS_PATH}/{THREAD_ID}/transcriptions"
 EXPECTED_TRANSCRIPTION = "¿podrías conseguirme los reportes que están en la página 5 de mi pdf, por favor?"
+
 
 async def test_transcription_endpoint(client: AsyncClient):
     content = await find_asset_bytes("audio.webm")
@@ -17,6 +19,7 @@ async def test_transcription_endpoint(client: AsyncClient):
     resp.raise_for_status()
     result = ThreadTranscriptionResult(**resp.json())
     assert result.transcription.lower().strip() == EXPECTED_TRANSCRIPTION.lower().strip()
+
 
 async def test_transcription_invalid_file(client: AsyncClient):
     files = {

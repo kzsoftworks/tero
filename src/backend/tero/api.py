@@ -8,12 +8,13 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 
 from .agents.api import router as agents_router
+from .agents.evaluators.api import router as evaluators_router
 from .agents.prompts.api import router as agents_prompts_router
 from .agents.test_cases.api import router as test_cases_router
 from .ai_models.api import router as ai_models_router
-from .core.env import env
 from .core.api import BASE_PATH
 from .core.domain import CamelCaseModel
+from .core.env import env
 from .external_agents.api import router as external_agents_router
 from .mcp_server import setup_mcp_server
 from .teams.api import router as teams_router
@@ -42,12 +43,13 @@ app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_credentials=True, 
 app.add_middleware(GZipMiddleware)
 if env.frontend_path:
     app.mount("/assets", StaticFiles(directory=os.path.join(env.frontend_path, "assets")), name="assets")
-
 setup_mcp_server(app)
+
 
 def _should_serve_frontend(path: str) -> bool:
     api_paths = ["/api", "/assets", "/mcp", "/.well-known/", "/resources/"]
     return not any(path.startswith(prefix) for prefix in api_paths) and path != "/manifest.json"
+
 
 @app.middleware("http")
 async def frontend_router(request: Request, call_next) -> Response:
@@ -82,6 +84,7 @@ class Manifest(CamelCaseModel):
     id: str
     contact_email: str
     auth: ManifestAuthConfig
+    disable_publish_global: bool
 
 
 @app.get("/manifest.json")
@@ -92,6 +95,7 @@ async def manifest() -> Manifest:
         auth=ManifestAuthConfig(
             url=env.frontend_openid_url or env.openid_url, client_id=env.openid_client_id, scope=env.openid_scope
         ),
+        disable_publish_global=env.disable_publish_global or False
     )
 
 
@@ -110,6 +114,7 @@ for router in [
     users_router,
     teams_router,
     external_agents_router,
-    test_cases_router
+    test_cases_router,
+    evaluators_router
 ]:
     app.include_router(router)

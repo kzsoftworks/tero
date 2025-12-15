@@ -37,7 +37,7 @@ export function useAgentPromptStore() {
     agentsPromptStore.setPrompts(await api.findAgentPrompts(agentId))
   }
 
-  async function updatePrompt(agentId: number, promptId:number, prompt: AgentPromptUpdate) {
+  async function updatePrompt(agentId: number, promptId: number, prompt: AgentPromptUpdate) {
     const updatedPrompt = await api.updateAgentPrompt(agentId, promptId, prompt)
     agentsPromptStore.updatePrompt(updatedPrompt)
   }

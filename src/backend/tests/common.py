@@ -1,23 +1,23 @@
 import asyncio
+from datetime import datetime
 import json
 import logging
 import os
-from datetime import datetime
 from typing import AsyncGenerator, List, Sequence, AsyncContextManager, Optional, Generator
 
 import aiofiles
-import freezegun
-import pytest
-import pytest_asyncio
-import sqlparse
 from fastapi import status, Depends # noqa: F401  # used by test files importing common
+import freezegun
 from freezegun import freeze_time # noqa: F401  # used by test files importing common
 from httpx import Response, AsyncClient, ASGITransport
 from pydantic import BaseModel
+import pytest
+import pytest_asyncio
 from sqlalchemy.ext.asyncio import create_async_engine, AsyncConnection
 from sqlalchemy.orm import Mapped
 from sqlmodel import SQLModel, select, func, col
 from sqlmodel.ext.asyncio.session import AsyncSession
+import sqlparse
 from testcontainers.postgres import PostgresContainer
 
 # avoid any authentication requirements
@@ -25,18 +25,20 @@ os.environ['OPENID_URL'] = ''
 
 from tero.agents.api import AGENT_TOOLS_PATH, AGENT_TOOL_FILES_PATH
 from tero.agents.domain import AgentListItem, Agent
+from tero.agents.test_cases.domain import TestSuiteRun, TestCaseResult
 from tero.api import app
+from tero.core import repos as repos_module, auth
 from tero.core.env import env # noqa: F401  # used by test files importing common
 from tero.core.api import BASE_PATH # noqa: F401  # used by test files importing common
 from tero.core.assets import solve_asset_path
+from tero.core.env import env # noqa: F401  # used by test files importing common
 from tero.core.repos import get_db
 from tero.files.domain import FileStatus
+from tero.teams.domain import Role, Team, TeamRole, TeamRoleStatus
 from tero.threads.api import THREAD_MESSAGES_PATH, THREADS_PATH, ThreadCreateApi
 from tero.threads.domain import Thread, ThreadMessage
 from tero.tools.docs import DOCS_TOOL_ID
 from tero.users.domain import User, UserListItem
-from tero.teams.domain import Role, Team, TeamRole, TeamRoleStatus
-from tero.core import auth
 
 
 def parse_date(value: str) -> datetime:
@@ -84,13 +86,18 @@ def postgres_container() -> Generator[PostgresContainer, None, None]:
 
 @pytest_asyncio.fixture(name="session")
 async def session_fixture(postgres_container: PostgresContainer) -> AsyncGenerator[AsyncSession, None]:
-    engine = create_async_engine(postgres_container.get_connection_url())
-    async with engine.begin() as conn:
-        await conn.run_sync(SQLModel.metadata.drop_all)
-        await conn.run_sync(SQLModel.metadata.create_all)
-        await _init_db_data(conn)
-    async with AsyncSession(engine, expire_on_commit=False) as ret:
-        yield ret
+    test_engine = create_async_engine(postgres_container.get_connection_url())
+    original_engine = repos_module.engine
+    repos_module.engine = test_engine
+    try:
+        async with test_engine.begin() as conn:
+            await conn.run_sync(SQLModel.metadata.drop_all)
+            await conn.run_sync(SQLModel.metadata.create_all)
+            await _init_db_data(conn)
+        async with AsyncSession(test_engine, expire_on_commit=False) as ret:
+            yield ret
+    finally:
+        repos_module.engine = original_engine
 
 
 async def _init_db_data(conn: AsyncConnection) -> None:
@@ -106,7 +113,15 @@ async def client_fixture(session: AsyncSession) -> AsyncGenerator[AsyncClient, N
     async def get_db_override() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
+    async def get_current_user_override(db: AsyncSession = Depends(get_db)):
+        from tero.users.repos import UserRepository
+        user = await UserRepository(db).find_by_id(USER_ID)
+        if user is None:
+            raise ValueError(f"User with ID {USER_ID} not found")
+        return user
+
     app.dependency_overrides[get_db] = get_db_override
+    app.dependency_overrides[auth.get_current_user] = get_current_user_override
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         yield client
     app.dependency_overrides.clear()
@@ -295,3 +310,13 @@ async def fixture_last_thread_id(session: AsyncSession) -> int:
 @pytest.fixture(name="last_message_id")
 async def fixture_last_message_id(session: AsyncSession) -> int:
     return await find_last_id(col(ThreadMessage.id), session)
+
+
+@pytest.fixture(name="last_suite_run_id")
+async def fixture_last_suite_run_id(session: AsyncSession) -> int:
+    return await find_last_id(col(TestSuiteRun.id), session)
+
+
+@pytest.fixture(name="last_result_id")
+async def fixture_last_result_id(session: AsyncSession) -> int:
+    return await find_last_id(col(TestCaseResult.id), session)

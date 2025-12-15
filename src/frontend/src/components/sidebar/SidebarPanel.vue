@@ -1,5 +1,6 @@
 <script lang="ts" setup>
-import { onMounted, ref, computed } from 'vue';
+import { onMounted, ref, computed, watch } from 'vue';
+import { IconChevronDown, IconChevronUp, IconPlus, IconSearch, IconLogout } from '@tabler/icons-vue';
 import { useRouter } from 'vue-router';
 import { useI18n } from 'vue-i18n';
 import { useChatStore } from '@/composables/useChatStore';
@@ -7,7 +8,7 @@ import { useAgentStore } from '@/composables/useAgentStore';
 import { useErrorHandler } from '@/composables/useErrorHandler';
 import SidebarSkeleton from './SidebarSkeleton.vue';
 import SidebarSearch from './SidebarSearch.vue';
-import type { Thread, Agent } from '@/services/api';
+import { type Thread, type Agent, ApiService } from '@/services/api';
 import { useSidebar } from '@/composables/useSidebar';
 
 const { t } = useI18n();
@@ -18,14 +19,44 @@ const { agentsStore, loadAgents } = useAgentStore();
 const { newAgent } = useAgentStore();
 const { handleError } = useErrorHandler();
 const { isSidebarCollapsed } = useSidebar();
+const api = new ApiService();
 
 const showingSearchInput = ref(false);
 const isLoading = ref(true);
 const searchQuery = ref('');
 const searchResults = ref<{ agents: Agent[], chats: Thread[] }>({ agents: [], chats: [] });
 const sidebarSearchRef = ref<InstanceType<typeof SidebarSearch> | null>(null);
+const agentsCollapsed = ref(false);
+const chatsCollapsed = ref(false);
+const defaultAgentName = ref<string>('');
+
+const filterModeIsActive = computed(() => showingSearchInput.value && searchQuery.value )
 const displayedAgents = computed(() => filterModeIsActive.value && !sidebarSearchRef.value?.isSearching ? searchResults.value.agents : agentsStore.agents);
 const displayedChats = computed(() => filterModeIsActive.value && !sidebarSearchRef.value?.isSearching ? searchResults.value.chats : chatsStore.chats);
+
+onMounted(async () => {
+  try {
+    isLoading.value = true;
+    await loadAgents();
+    await loadChats();
+    defaultAgentName.value = (await api.findDefaultAgent()).name!;
+  } catch (error) {
+    handleError(error);
+  } finally {
+    isLoading.value = false;
+  }
+})
+
+const toggleSidebar = () => {
+  isSidebarCollapsed.value = !isSidebarCollapsed.value;
+};
+
+const handleSearchClick = () => {
+  if (filterModeIsActive.value) {
+    sidebarSearchRef.value?.clearSearch();
+  }
+  showingSearchInput.value = !showingSearchInput.value;
+};
 
 const onNewAgent = async () => {
   try {
@@ -35,38 +66,17 @@ const onNewAgent = async () => {
   }
 }
 
-const toggleSidebar = () => {
-  isSidebarCollapsed.value = !isSidebarCollapsed.value;
-};
+const newChat = () => {
+  router.push('/');
+}
 
 const logout = () => {
   router.push('/logout');
 }
 
-const filterModeIsActive = computed(() => {
-  return showingSearchInput.value && searchQuery.value;
-})
-
-const handleSearchClick = () => {
-  if (filterModeIsActive.value) {
-    sidebarSearchRef.value?.clearSearch();
-  }
-  showingSearchInput.value = !showingSearchInput.value;
-};
-
-const newChat = () => {
-  router.push('/');
-}
-
-onMounted(async () => {
-  try {
-    isLoading.value = true;
-    await loadAgents();
-    await loadChats();
-  } catch (error) {
-    handleError(error);
-  } finally {
-    isLoading.value = false;
+watch(isSidebarCollapsed, (newVal) => {
+  if (newVal) {
+    agentsCollapsed.value = false;
   }
 })
 </script>
@@ -109,30 +119,50 @@ onMounted(async () => {
         <SidebarDiscoverItem />
       </div>
 
-      <SidebarAgent v-for="agent in displayedAgents" :key="agent.id" :agent="agent" />
-      <div v-if="displayedAgents.length === 0" class="justify-left p-2 text-light-gray">
-        {{ t(filterModeIsActive ? 'noAgentsFound' : 'noAgents')}}
+      <div v-if="!isSidebarCollapsed" class="sticky top-0 bg-white z-10 p-2">
+        <div class="flex items-center gap-1 text-sm">
+          <button @click="agentsCollapsed = !agentsCollapsed">
+            <component :is="agentsCollapsed ? IconChevronDown : IconChevronUp" class="w-5 h-5" />
+          </button>
+          <span class="text-light-gray">{{ t('agents') }}</span>
+        </div>
+      </div>
+
+      <div v-if="!agentsCollapsed">
+        <SidebarAgent v-for="agent in displayedAgents" :key="agent.id" :agent="agent" />
+        <div v-if="displayedAgents.length === 0" class="justify-left p-2 text-light-gray">
+          {{ t(filterModeIsActive ? 'noAgentsFound' : 'noAgents')}}
+        </div>
       </div>
 
       <div v-if="!isSidebarCollapsed" class="mt-5">
         <div class="sticky top-0 bg-white z-10">
           <div class="flex justify-between items-center p-2">
-            <h3 class="">{{ t('chats') }}</h3>
+            <div class="flex items-center gap-1 text-sm">
+              <button @click="chatsCollapsed = !chatsCollapsed">
+                <component :is="chatsCollapsed ? IconChevronDown : IconChevronUp" class="w-5 h-5" />
+              </button>
+              <span class="text-light-gray">{{ t('chats') }}</span>
+            </div>
             <SimpleButton
               size="small"
               @click="newChat"
-              class="hover:text-primary! hover:bg-transparent! border-0! ring-0! outline-0! shadow-none! gap-0.5!"
+              v-tooltip.bottom="t('newChatTooltip', { name: defaultAgentName })"
+              class="hover:text-primary! hover:bg-transparent! border-0! ring-0! outline-0! shadow-none! text-sm font-semibold gap-1"
             >
-              <IconPlus size="12"  class="font-medium"/>
-              <p class="underline underline-offset-2 font-medium">{{ t('newChat') }}</p>
+              <IconPlus class="w-5 h-5"/>
+              <p class="underline underline-offset-2">{{ t('newChat') }}</p>
             </SimpleButton>
           </div>
         </div>
 
-        <SidebarChat v-for="chat in displayedChats" :key="chat.id" :chat="chat" />
-        <div v-if="displayedChats.length === 0" class="justify-left p-2 text-light-gray">
-          {{ t(filterModeIsActive ? 'noChatsFound' : 'noChats') }}
+        <div v-if="!chatsCollapsed">
+          <SidebarChat v-for="chat in displayedChats" :key="chat.id" :chat="chat" />
+          <div v-if="displayedChats.length === 0" class="justify-left p-2 text-light-gray">
+            {{ t(filterModeIsActive ? 'noChatsFound' : 'noChats') }}
+          </div>
         </div>
+
       </div>
     </div>
 
@@ -154,6 +184,8 @@ onMounted(async () => {
   {
     "en": {
       "createAgent": "Create agent",
+      "agents": "Agents",
+      "newChatTooltip": "Start new chat with {name}",
       "chats": "My chats",
       "logout": "Log out",
       "noChats": "Nothing to show here yet",
@@ -167,6 +199,8 @@ onMounted(async () => {
     },
     "es": {
       "createAgent": "Crear agente",
+      "agents": "Agentes",
+      "newChatTooltip": "Iniciar nuevo chat con {name}",
       "chats": "Mis chats",
       "logout": "Cerrar sesión",
       "noChats": "No hay nada para mostrar",

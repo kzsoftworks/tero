@@ -1,13 +1,13 @@
 import { browser } from 'wxt/browser';
 import { type Browser } from 'wxt/browser';
-import { Agent, RequestEvent, RequestEventType} from "~/utils/agent";
-import { findAllAgents, findAgentById, removeAllAgents, } from "~/utils/agent-repository";
+import { Agent, RequestEvent, RequestEventType } from "~/utils/agent";
+import { findAllAgents, findAgentById, removeAllAgents } from "~/utils/agent-repository";
 import { AgentSession } from "~/utils/agent-session";
-import { findAgentSession, saveAgentSession, removeAgentSession, } from "~/utils/agent-session-repository";
+import { findAgentSession, saveAgentSession, removeAgentSession } from "~/utils/agent-session-repository";
 import { AgentSource } from "~/utils/agent";
-import { BrowserMessage, ToggleSidebar, ActiveTabListener, ActivateAgent, AgentActivation, InteractionSummary, } from "~/utils/browser-message";
+import { BrowserMessage, ToggleSidebar, ActiveTabListener, ActivateAgent, AgentActivation, InteractionSummary } from "~/utils/browser-message";
 import { HttpServiceError } from "~/utils/http";
-import { isActiveTabListener, setTabListenerActive, removeTabListenerStatus, } from "~/utils/tab-listener-status-repository";
+import { isActiveTabListener, setTabListenerActive, removeTabListenerStatus } from "~/utils/tab-listener-status-repository";
 import { removeTabState } from "~/utils/tab-state-repository";
 
 export default defineBackground(() => {
@@ -17,7 +17,6 @@ export default defineBackground(() => {
   browser.runtime.onInstalled.addListener(async () => {
     await removeAllAgents()
     createToggleContextMenu();
-    console.log("onInstalled", import.meta.env.DEV)
     if (import.meta.env.DEV) { 
       try {
         await AgentSource.loadAgentsFromUrl("http://localhost:8000");
@@ -98,14 +97,16 @@ export default defineBackground(() => {
   const activateAgent = async (tabId: number, agent: Agent, url: string) => {
     const session = new AgentSession(tabId, agent, url);
     let success = true;
+    let errorStatus = undefined;
     try {
       await session.activate((msg) => sendToTab(tabId, msg));
       await saveAgentSession(session);
     } catch (e) {
       // exceptions from http methods are already logged so no need to handle them
       success = false;
+      errorStatus = (e as any)?.status;
     }
-    sendToTab(tabId, new AgentActivation(agent, success));
+    sendToTab(tabId, new AgentActivation(agent, success, errorStatus));
   };
 
   browser.webRequest.onBeforeRequest.addListener(

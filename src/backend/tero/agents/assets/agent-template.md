@@ -79,6 +79,27 @@ By {{ author }}
 
 {% endfor %}
 {% endif %}
+{% if evaluator %}
+## Tests Evaluator
+
+| | |
+|-|-|
+| Model | `{{ evaluator.model_name }}` |
+{% for key, value in evaluator.model_config.items() %}
+| {{ key }} | `{{ value }}` |
+{% endfor %}
+
+### Instructions
+
+<details>
+
+````
+{{ evaluator.prompt }}
+````
+
+</details>
+
+{% endif %}
 {% if tests %}
 ## Tests
 
@@ -92,6 +113,25 @@ By {{ author }}
 ````
 
 {% endfor %}
+{% if test.evaluator %}
+### Test Evaluator
+
+| | |
+|-|-|
+| Model | `{{ test.evaluator.model_name }}` |
+{% for key, value in test.evaluator.model_config.items() %}
+| {{ key }} | `{{ value }}` |
+{% endfor %}
+
+#### Instructions
+
+<details>
+````
+{{ test.evaluator.prompt }}
+````
+</details>
+
+{% endif %}
 </details>
 
 {% endfor %}

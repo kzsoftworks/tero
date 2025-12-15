@@ -1,10 +1,17 @@
 <script lang="ts" setup>
-import { onBeforeMount, ref } from 'vue'
+import { onBeforeMount, ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useToast } from 'vue-toastification'
-import { IconCirclePlus, IconRefresh, IconTrashX, IconLoader } from '@tabler/icons-vue'
-import { findAllAgents, removeAgent, removeAllAgents, updateAgents } from '~/utils/agent-repository'
+import { IconPlus, IconLoader } from '@tabler/icons-vue'
+import { findAllAgents, removeAgent, updateAgents, removeAgentsByHubUrl } from '~/utils/agent-repository'
 import { Agent, AgentType, AgentSource } from '~/utils/agent'
+
+interface HubGroup {
+  url: string
+  name: string
+  agents: Agent[]
+  isExpanded: boolean
+}
 
 defineEmits<{
   (e: 'close'): void
@@ -16,6 +23,44 @@ const agents = ref<Agent[]>()
 const showAddCopilot = ref(false)
 const deletingIndex = ref(-1)
 const isLoading = ref(false)
+const hubStates = ref<Map<string, boolean>>(new Map())
+const deletingHubUrl = ref<string | null>(null)
+
+const groupedAgents = computed(() => {
+  if (!agents.value) return { hubs: new Map<string, HubGroup>(), standalone: [] as Agent[] }
+  
+  const hubs = new Map<string, HubGroup>()
+  const standalone: Agent[] = []
+  
+  agents.value.forEach(agent => {
+    if (agent.type === AgentType.TeroAgent) {
+      const hubUrl = agent.url
+      if (!hubs.has(hubUrl)) {
+        const isExpanded = hubStates.value.get(hubUrl) ?? true
+        const hubGroup: HubGroup = {
+          url: hubUrl,
+          name: getHubName(hubUrl),
+          agents: [],
+          isExpanded
+        }
+        hubs.set(hubUrl, hubGroup)
+      }
+      hubs.get(hubUrl)!.agents.push(agent)
+    } else {
+      standalone.push(agent)
+    }
+  })
+  
+  return { hubs, standalone }
+})
+
+const getHubName = (url: string): string => {
+  try {
+    return new URL(url).hostname
+  } catch {
+    return url
+  }
+}
 
 onBeforeMount(async () => {
   agents.value = await findAllAgents()
@@ -64,53 +109,110 @@ const onCopilotAdded = (agent: Agent) => {
   showAddCopilot.value = false
 };
 
-const refreshAgents = async () => {
+const cleanupAgents = async (agentsToCleanup: Agent[]) => {
+  for (const agent of agentsToCleanup) {
+    await agent.tearDown()
+  }
+}
+
+const refreshHub = async (hubUrl: string) => {
   isLoading.value = true
   let existingAgents: Agent[] = []
   try {
     existingAgents = await findAllAgents()
-    const agentUrls = [...new Set(existingAgents.map(agent => agent.url))] 
-    await removeAllAgents()
-    await Promise.all(agentUrls.map(url => AgentSource.loadAgentsFromUrl(url)))
+    const hubAgents = existingAgents.filter(a => a.type === AgentType.TeroAgent && a.url === hubUrl)
+    await cleanupAgents(hubAgents)
+    await removeAgentsByHubUrl(hubUrl)
+    await AgentSource.loadAgentsFromUrl(hubUrl)
     agents.value = await findAllAgents()
   } catch (e: any) {
     agents.value = existingAgents
-    // Restore existing agents as backup in case removeAllAgents() was called but subsequent operations failed
     await updateAgents(existingAgents)
-    toast.error(t('refreshError'))
+    toast.error(t('refreshHubError'))
   } finally {
     isLoading.value = false
   }
 };
+
+const removeHub = (hubUrl: string) => {
+  deletingHubUrl.value = hubUrl
+};
+
+const closeHubDeletionConfirmation = () => {
+  deletingHubUrl.value = null
+};
+
+const confirmHubRemoval = async () => {
+  if (!deletingHubUrl.value) return
+  try {
+    const existingAgents = await findAllAgents()
+    const hubAgents = existingAgents.filter(a => a.type === AgentType.TeroAgent && a.url === deletingHubUrl.value)
+    await cleanupAgents(hubAgents)
+    await removeAgentsByHubUrl(deletingHubUrl.value)
+    agents.value = await findAllAgents()
+    closeHubDeletionConfirmation()
+  } catch (e: any) {
+    toast.error(t('removeHubError'))
+  }
+};
+
+const refreshStandaloneAgent = async (agentId: string) => {
+  const existingAgents = await findAllAgents()
+  const existingAgent = existingAgents.find(a => a.manifest.id === agentId)
+  if (!existingAgent || existingAgent.type !== AgentType.StandaloneAgent) return
+  await refreshHub(existingAgent.url)
+};
+
+const removeStandaloneAgent = (agentId: string) => {
+  const index = agents.value!.findIndex(a => a.manifest.id === agentId)
+  removeCopilot(index)
+};
+
+const setHubState = (hubUrl: string, value: boolean) => {
+  hubStates.value.set(hubUrl, value)
+}
+
+const getHubState = (hubUrl: string): boolean => {
+  return hubStates.value.get(hubUrl) ?? true
+}
 </script>
 
 <template>
   <PageOverlay>
     <template v-slot:headerActions>
-      <button v-if="agents && agents.length > 0" @click="refreshAgents" :title="t('refreshTitle')">
-        <IconRefresh class="w-6.5 h-6.5 relative" />
-      </button>
       <BtnClose @click="$emit('close')" />
     </template>
     <template v-slot:content>
       <div v-if="isLoading" class="flex justify-center items-center w-full h-full">
         <IconLoader class="animate-spin text-violet-600" />
       </div>
-      <div v-if="!isLoading" class="flex flex-row py-3">
-        <div class="flex items-center text-base cursor-pointer" @click="showAddCopilot = true"><IconCirclePlus />{{ t('addTitle') }}</div>
-      </div>
-      <div v-if="!isLoading" v-for="(agent, index) in agents" :key="agent.manifest.id" class="flex flex-row py-3 ">
-        <div class="flex flex-row flex-auto self-center items-center cursor-pointer gap-2" @click="$emit('activateAgent', agent.manifest.id)">
-          <div class="w-7 h-7 flex flex-row items-center rounded-full overflow-hidden">
-            <img :src="agent.logo" class="w-full h-full object-contain m-0" />
-          </div>
-          <div class="text-lg font-medium">
-            {{ agent.manifest.name! }}
-          </div>
+      <div v-if="!isLoading" class="space-y-2">
+        <div v-if="groupedAgents.hubs.size === 0 && groupedAgents.standalone.length === 0" class="flex justify-center items-center w-full h-full py-8">
+          <span class="text-light-gray text-center whitespace-pre-line">{{ t('noAgents') }}</span>
         </div>
-        <button v-if="agent.type !== AgentType.TeroAgent" @click="removeCopilot(index)">
-          <IconTrashX class="action-icon" />
-        </button>
+        <HubSection 
+          v-for="[hubUrl, hub] in groupedAgents.hubs" 
+          :key="hubUrl" 
+          :title="hub.name"
+          :default-expanded="hub.isExpanded"
+          @update:expanded="(value: boolean) => setHubState(hubUrl, value)">
+          <template #actions>
+            <HubActionsMenu :hub-url="hubUrl" @refresh="refreshHub(hubUrl)" @remove="removeHub(hubUrl)" />
+          </template>
+          <div v-for="agent in hub.agents" :key="agent.manifest.id" class="flex flex-row py-3">
+            <CopilotItem :agent="agent" @activate="$emit('activateAgent', $event)" />
+          </div>
+        </HubSection>
+        <HubSection
+          v-if="groupedAgents.standalone.length > 0"
+          :title="t('standalone')"
+          :default-expanded="getHubState('standalone')"
+          @update:expanded="(value: boolean) => setHubState('standalone', value)">
+          <div v-for="agent in groupedAgents.standalone" :key="agent.manifest.id" class="flex flex-row py-3">
+            <CopilotItem :agent="agent" @activate="$emit('activateAgent', $event)" />
+            <HubActionsMenu type="agent" @refresh="refreshStandaloneAgent(agent.manifest.id!)" @remove="removeStandaloneAgent(agent.manifest.id!)" />
+          </div>
+        </HubSection>
       </div>
     </template>
     <template v-slot:modalsContainer>
@@ -121,7 +223,22 @@ const refreshAgents = async () => {
           })
         }}
       </ModalForm>
+      <ModalForm :title="t('removeHubTitle')" :show="deletingHubUrl !== null" @close="closeHubDeletionConfirmation" @save="confirmHubRemoval" :button-text="t('removeButton')">
+        {{
+          t('removeHubConfirmation', {
+            hubName: deletingHubUrl ? getHubName(deletingHubUrl) : ''
+          })
+        }}
+      </ModalForm>
       <AddCopilotModal :show="showAddCopilot" @close="showAddCopilot = false" @saved="onCopilotAdded" />
+    </template>
+    <template v-slot:footer>
+      <div v-if="!isLoading" class="flex flex-row p-3">
+         <SimpleButton @click="showAddCopilot = true" shape="square" size="small" class="gap-2 px-3">
+          <IconPlus size="16" />
+          <span>{{ t('addTitle') }}</span>
+        </SimpleButton>
+      </div>
     </template>
   </PageOverlay>
 </template>
@@ -129,20 +246,30 @@ const refreshAgents = async () => {
 <i18n lang="json">
 {
   "en": {
-    "addTitle": "Add copilot",
+    "addTitle": "Add",
+    "refreshHubError": "Error refreshing the Tero instance",
+    "removeHubError": "Error removing the Tero instance",
     "removeTitle": "Remove copilot",
     "removeButton": "Remove",
     "removeConfirmation": "Are you sure you want to remove the copilot {agentName}?",
-    "refreshTitle": "Refresh agents",
-    "refreshError": "Could not refresh agents. Try again and if the problem persists contact support."
+    "refreshAgentError": "Error refreshing agent",
+    "standalone": "Standalone",
+    "noAgents": "No agents available\nClick Add to add a new agent",
+    "removeHubTitle": "Remove Tero instance",
+    "removeHubConfirmation": "Are you sure you want to remove the Tero instance {hubName} and all its agents?"
   },
   "es" : {
-    "addTitle": "Agregar copiloto",
+    "addTitle": "Agregar",
+    "refreshHubError": "Error al actualizar la instancia de Tero",
+    "removeHubError": "Error al eliminar la instancia de Tero",
     "removeTitle": "Quitar copiloto",
     "removeButton": "Quitar",
-    "removeConfirmation": "¿Estás seguro de borrar el copiloto {agentName}?",
-    "refreshTitle": "Actualizar copilotos",
-    "refreshError": "No se pudieron actualizar los copilotos. Intenta de nuevo y si el problema persiste contacta a soporte."
+    "removeConfirmation": "¿Estás seguro de quitar el copiloto {agentName}?",
+    "refreshAgentError": "Error al actualizar agente",
+    "standalone": "Independientes",
+    "noAgents": "No hay agentes disponibles\nHaz clic en Agregar para agregar un nuevo agente",
+    "removeHubTitle": "Quitar instancia de Tero",
+    "removeHubConfirmation": "¿Estás seguro de quitar la instancia de Tero {hubName} y todos sus agentes?"
   }
 }
 </i18n>

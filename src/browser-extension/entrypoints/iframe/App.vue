@@ -11,6 +11,7 @@ import { findTabState, saveTabState } from '~/utils/tab-state-repository'
 import { findAgentSession } from '~/utils/agent-session-repository'
 import { FlowStepError } from '~/utils/flow'
 import { HttpServiceError } from '~/utils/http'
+import { AuthService } from '~/utils/auth'
 import ToastMessage from '~/components/ToastMessage.vue'
 import CopilotChat from '~/components/CopilotChat.vue'
 import CopilotList from '~/components/CopilotList.vue'
@@ -180,11 +181,18 @@ const onActivateAgent = async (agentId: string) => {
   sendToServiceWorker(new ActivateAgent(agentId, tab.url!))
 }
 
-const onAgentActivation = (msg: AgentActivation) => {
+const onAgentActivation = async (msg: AgentActivation) => {
   if (displayMode.value === TabDisplayMode.CLOSED) {
     onToggleSidebar()
   }
   if (!msg.success) {
+    if (msg.errorStatus === 401 && msg.agent.manifest.auth) {
+      const authService = new AuthService(msg.agent.manifest.auth)
+      await authService.ensureAuthenticated()
+      await onActivateAgent(msg.agent.manifest.id!)
+      return
+    }
+
     const text = t('activationError', { agentName: msg.agent.manifest.name, contactEmail: msg.agent.manifest.contactEmail })
     toast.error({ component: ToastMessage, props: { message: text } }, { icon: IconAlertCircleFilled })
   } else {
@@ -326,7 +334,7 @@ const sidebarClasses = computed(() => [
     "flowStepMissingElement": "I could not find the element '{selector}'. This might be due to recent changes in the page which I am not aware of. Please try again and if the issue persists contact [support](mailto:{contactEmail}?subject=Navigation%20element).",
   },
   "es": {
-    "activationError": "No se pudo activar el {agentName}. Puedes intentar de nuevo y si el problema persiste contactar al [soporte de {agentName}](mailto:{contactEmail}?subject=Activation%20issue)",
+    "activationError": "No se pudo activar {agentName}. Puedes intentar de nuevo y si el problema persiste contactar al [soporte de {agentName}](mailto:{contactEmail}?subject=Activation%20issue)",
     "interactionSummaryError": "No pude procesar informacion generada por la página actual. Esto puede impactar en la información y respuestas que te puedo dar. Si el problema persiste por favor contacta a [soporte](mailto:{contactEmail})?subject=Interaction%20issue",
     "agentAnswerError": "Ahora no puedo completar tu pedido. Puedes intentar de nuevo y si el problema persiste contactar a [soporte](mailto:{contactEmail}?subject=Question%20issue)",
     "flowStepMissingElement": "No pude encontrar el elemento '{selector}'. Esto puede ser debido a cambios recientes en la página de los cuales no tengo conocimiento. Por favor intenta de nuevo y si el problema persiste contacta a [soporte](mailto:{contactEmail}?subject=Navigation%20element).", 

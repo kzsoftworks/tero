@@ -1,10 +1,13 @@
+import logging
 import os
-from typing import List, Optional
-
 import re
+from typing import List, Optional
 
 from pydantic import SecretStr, field_validator, BaseModel, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+logger = logging.getLogger(__name__)
 
 
 class AzureModelDeployment(BaseModel):
@@ -13,7 +16,7 @@ class AzureModelDeployment(BaseModel):
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(enable_decoding=False)
+    model_config = SettingsConfigDict(enable_decoding=False, extra="allow")
     
     db_url : str
     secret_encryption_key : SecretStr
@@ -24,6 +27,7 @@ class Settings(BaseSettings):
     openid_client_id : str
     openid_scope : str
     allowed_users : list[str] = []
+    disable_publish_global : Optional[bool] = False
     contact_email : str
     azure_app_insights_connection : Optional[str] = None
     azure_endpoints : list[str]
@@ -38,7 +42,6 @@ class Settings(BaseSettings):
     internal_generator_model : str
     internal_generator_temperature : float
     internal_evaluator_model : Optional[str] = None
-    internal_evaluator_temperature : Optional[float] = None
     agent_default_model : Optional[str] = None
     agent_basic_models : List[str]
     default_agent_name : str
@@ -105,7 +108,12 @@ class Settings(BaseSettings):
     def set_defaults(self):
         self.agent_default_model = self.agent_default_model or self.internal_generator_model
         self.internal_evaluator_model = self.internal_evaluator_model or self.internal_generator_model
-        self.internal_evaluator_temperature = self.internal_evaluator_temperature or self.internal_generator_temperature
+        return self
+
+    @model_validator(mode="after")
+    def warn_extra_fields(self):
+        if self.__pydantic_extra__:
+            logger.warning(f"Ignoring unexpected variables found in .env file: {', '.join(self.__pydantic_extra__.keys())}. Please review if you mistyped the variable name or if the variable name has changed in a recent version of the application.")
         return self
 
 

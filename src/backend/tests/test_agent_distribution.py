@@ -1,7 +1,8 @@
-import aiofiles
 from io import BytesIO
 from typing import cast
 from zipfile import ZipFile
+
+import aiofiles
 
 from .common import *
 
@@ -9,12 +10,12 @@ from tero.agents.api import AGENTS_PATH, AGENT_PATH, AGENT_TOOLS_PATH, AGENT_TOO
 from tero.agents.domain import PublicAgent, AgentToolConfig, LlmTemperature, ReasoningEffort, AgentUpdate
 from tero.agents.prompts.api import AGENT_PROMPTS_PATH
 from tero.agents.prompts.domain import AgentPromptCreate, AgentPromptPublic, AgentPrompt
-from tero.agents.test_cases.api import TEST_CASES_PATH, TEST_CASE_MESSAGES_PATH
+from tero.agents.test_cases.api import TEST_CASES_PATH, TEST_CASE_MESSAGES_PATH, TEST_CASE_PATH
 from tero.agents.test_cases.domain import NewTestCaseMessage, PublicTestCase
 from tero.files.domain import FileMetadata, FileStatus, File, FileProcessor
 from tero.threads.domain import ThreadMessageOrigin, Thread, ThreadMessagePublic
-from tero.tools.web import WEB_TOOL_ID
 from tero.tools.browser import BROWSER_TOOL_ID
+from tero.tools.web import WEB_TOOL_ID
 from tero.users.domain import UserListItem
 
 
@@ -87,18 +88,18 @@ async def test_import_exported_agent_with_all_tools_and_configs(
         NewTestCaseMessage(text="Test user message", origin=ThreadMessageOrigin.USER),
         NewTestCaseMessage(text="Test agent message", origin=ThreadMessageOrigin.AGENT),
     ]
-    source_agent_id = await _create_agent_with_all_tools_and_configs(
+    source_agent_id, test_case_name = await _create_agent_with_all_tools_and_configs(
         agent_update, prompts, advanced_file_processing, file_name, file_content, test_messages, client)
     zip_file_content = await _export_agent(source_agent_id, client)
     target_agent_id = await _create_agent(client)
     await _import_agent(target_agent_id, zip_file_content, client)
     await _assert_imported_agent(target_agent_id, agent_update, prompts, advanced_file_processing, file_name, file_content, test_messages, 
-        last_prompt_id + len(prompts), last_file_id + 1, last_thread_id + 1, last_message_id + len(test_messages), users, client)
+        last_prompt_id + len(prompts), last_file_id + 1, last_thread_id + 1, last_message_id + len(test_messages), test_case_name, users, client)
 
 
 async def _create_agent_with_all_tools_and_configs(
         agent_update: AgentUpdate, prompts: list[AgentPromptCreate], advanced_file_processing: bool, file_name: str, file_content: bytes, 
-        test_messages: list[NewTestCaseMessage], client: AsyncClient) -> int:
+        test_messages: list[NewTestCaseMessage], client: AsyncClient) -> tuple[int, str]:
     agent_id = await _create_agent(client)
     await _update_agent(agent_id, agent_update, client)
     for prompt in prompts:
@@ -113,7 +114,9 @@ async def _create_agent_with_all_tools_and_configs(
     test_id = await _add_test(agent_id, client)
     for message in test_messages:
         await _add_test_message(agent_id, test_id, message, client)
-    return agent_id
+    # refresh test case to get updated name after adding messages
+    test_case = await _find_test_case(agent_id, test_id, client)
+    return agent_id, test_case["thread"]["name"]
 
 
 async def _update_agent(agent_id: int, update: AgentUpdate, client: AsyncClient):
@@ -140,7 +143,7 @@ async def _add_test_message(agent_id: int, test_case_id: int, message: NewTestCa
 
 async def _assert_imported_agent(agent_id: int, agent_update: AgentUpdate, prompts: list[AgentPromptCreate], 
         advanced_file_processing: bool, file_name: str, file_content: bytes, test_messages: list[NewTestCaseMessage], 
-        last_prompt_id: int, last_file_id: int, last_thread_id: int, last_message_id: int, users: List[UserListItem], client: AsyncClient):
+        last_prompt_id: int, last_file_id: int, last_thread_id: int, last_message_id: int, test_case_name: str, users: List[UserListItem], client: AsyncClient):
     resp = await _find_agent(agent_id, client)
     resp.raise_for_status()
     assert_response(resp, PublicAgent(
@@ -176,7 +179,7 @@ async def _assert_imported_agent(agent_id: int, agent_update: AgentUpdate, promp
     resp = await _find_agent_tests(agent_id, client)
     test_thread_id = last_thread_id + 1
     assert_response(resp, [PublicTestCase(
-        agent_id=agent_id, thread=Thread(id=test_thread_id, name="Test Case #1", user_id=USER_ID, agent_id=agent_id, creation=CURRENT_TIME, is_test_case=True), 
+        agent_id=agent_id, thread=Thread(id=test_thread_id, name=test_case_name, user_id=USER_ID, agent_id=agent_id, creation=CURRENT_TIME, is_test_case=True), 
         last_update=CURRENT_TIME)])
     resp = await _find_test_case_messages(agent_id, test_thread_id, client)
     assert_response(resp, [ThreadMessagePublic(
@@ -203,6 +206,12 @@ async def _find_agent_tests(agent_id: int, client: AsyncClient) -> Response:
 
 async def _find_test_case_messages(agent_id: int, test_case_id: int, client: AsyncClient) -> Response:
     return await client.get(TEST_CASE_MESSAGES_PATH.format(agent_id=agent_id, test_case_id=test_case_id))
+
+
+async def _find_test_case(agent_id: int, test_case_id: int, client: AsyncClient) -> dict:
+    resp = await client.get(TEST_CASE_PATH.format(agent_id=agent_id, test_case_id=test_case_id))
+    resp.raise_for_status()
+    return resp.json()
 
 
 async def test_export_non_visible_agent(client: AsyncClient):

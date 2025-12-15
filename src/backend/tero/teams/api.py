@@ -6,16 +6,16 @@ from sqlmodel.ext.asyncio.session import AsyncSession
 from ..agents.repos import AgentRepository
 from ..core.api import BASE_PATH
 from ..core.auth import get_current_user
-from ..core.repos import get_db
 from ..core.env import env
+from ..core.repos import get_db
 from ..users.domain import User
 from ..users.repos import UserRepository
 from .domain import GLOBAL_TEAM_ID, AddUsersToTeam, Role, TeamRole, TeamRoleStatus,\
     TeamRoleUpdate, TeamUser, TeamCreate, Team, TeamUpdate
 from .repos import TeamRepository
 
-router = APIRouter()
 
+router = APIRouter()
 TEAMS_PATH = f"{BASE_PATH}/teams"
 TEAM_USERS_PATH = f"{TEAMS_PATH}/{{team_id}}/users"
 TEAM_PATH = f"{TEAMS_PATH}/{{team_id}}"

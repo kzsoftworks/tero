@@ -45,7 +45,12 @@ class AuthService {
   }
 
   async loginCallback() {
-    await this.userManager.signinRedirectCallback()
+    try {
+      await this.userManager.signinRedirectCallback()
+    } catch (error) {
+      console.debug('Login callback failed, attempting token renewal:', error)
+      return await this.renewToken()
+    }
   }
 
   async getUser(): Promise<User | null> {

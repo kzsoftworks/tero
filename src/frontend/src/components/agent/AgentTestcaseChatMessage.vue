@@ -21,13 +21,15 @@ export class AgentTestcaseChatUiMessage{
     statusUpdates: StatusUpdate[] = []
     isStatusComplete: boolean = false
 
-    constructor(text: string, isUser: boolean, isPlaceholder: boolean, id?: number){
+    constructor(text: string, isUser: boolean, isPlaceholder: boolean, id?: number, statusUpdates?: StatusUpdate[]){
         this.uuid = uuidv4()
         this.text = text
         this.isUser = isUser
         this.isPlaceholder = isPlaceholder
         this.id = id
         this.isStreaming = false
+        this.statusUpdates = statusUpdates || []
+        this.isStatusComplete = (statusUpdates?.length || 0) > 0
     }
 
     public addStatusUpdate(statusUpdate: StatusUpdate): void {
@@ -99,7 +101,8 @@ const { t } = useI18n()
 }
 </style>
 
-<i18n lang="json">{
+<i18n lang="json">
+{
     "en": {
         "editMessageButton": "Edit message"
     },

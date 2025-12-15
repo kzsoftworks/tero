@@ -1,22 +1,24 @@
 import abc
 import base64
-import re
 from datetime import datetime, timezone
 from enum import Enum
+import re
 from typing import Any, Optional, cast
 
+import sqlalchemy as sa
 from sqlmodel import Field, Relationship, Index
 from sqlmodel import SQLModel, Column, Text, JSON
-import sqlalchemy as sa
 
-from ..ai_models.domain import LlmModel, LlmModelType
+from ..ai_models.domain import LlmModel, LlmModelType, LlmTemperature, ReasoningEffort
 from ..core.env import env
 from ..core.domain import CamelCaseModel
-from ..users.domain import User, UserListItem
 from ..teams.domain import Role, Team
+from ..users.domain import User, UserListItem
+
 
 NAME_MAX_LENGTH = 30
 CLONE_SUFFIX = "copy"
+
 
 class BaseAgent(CamelCaseModel, abc.ABC):
     id: int = Field(primary_key=True, default=None)
@@ -27,21 +29,6 @@ class BaseAgent(CamelCaseModel, abc.ABC):
     
     def set_default_name(self):
         self.name = f"Agent #{self.id}"
-
-
-class LlmTemperature(Enum):
-    CREATIVE = 'CREATIVE'
-    NEUTRAL = 'NEUTRAL'
-    PRECISE = 'PRECISE'
-
-    def get_float(self):
-        return env.temperatures[self.value]
-
-
-class ReasoningEffort(Enum):
-    LOW = 'LOW'
-    MEDIUM = 'MEDIUM'
-    HIGH = 'HIGH'
 
 
 class AgentUpdate(CamelCaseModel):
@@ -72,6 +59,7 @@ class Agent(BaseAgent, table=True):
     reasoning_effort: ReasoningEffort = ReasoningEffort.LOW
     team_id: Optional[int] = Field(default=None, foreign_key="team.id")
     team: Optional[Team] = Relationship()
+    evaluator_id: Optional[int] = Field(default=None, foreign_key="evaluator.id")
     
     def update_with(self, update: AgentUpdate):
         update_dict = update.model_dump(exclude_none=True)
@@ -92,7 +80,10 @@ class Agent(BaseAgent, table=True):
         return self.user_id == user.id or user.is_member_of(cast(int, self.team_id))
 
     def is_editable_by(self, user: User) -> bool:
-        return self.user_id == user.id or any(tr.role == Role.TEAM_OWNER and cast(Team, tr.team).id == self.team_id for tr in user.team_roles)
+        return self.user_id == user.id or any(
+            tr.role in [Role.TEAM_OWNER, Role.TEAM_EDITOR] and cast(Team, tr.team).id == self.team_id 
+            for tr in user.team_roles
+        )
 
     def clone(self, user_id: int) -> "Agent":
         base_name = (self.name or "").strip()
